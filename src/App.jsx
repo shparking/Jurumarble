@@ -253,14 +253,12 @@ function VotePanel({ room, pending: p, me, iAct, code }) {
         <div className="steal-list">
           {ids.map((pid) => {
             const pl = room.players[pid]
-            const n = Object.values(votes).filter((t) => t === pid).length
             return (
               <button key={pid} className={`steal-btn ${myVote === pid ? 'picked' : ''}`} onClick={() => castVote(code, room, pid)}>
                 <span className="avatar sm" style={{ background: pl.color }}>
                   {pl.name.slice(0, 1)}
                 </span>
                 <span className="pname">{pl.name}</span>
-                {n > 0 && <span className="tag">{n}표</span>}
                 {myVote === pid && <span className="me-tag">내 표</span>}
               </button>
             )
@@ -607,15 +605,13 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
             <div className="steal-list">
               {ids.map((pid) => {
                 const pl = room.players[pid]
-                const n = Object.values(votes).filter((t) => t === pid).length
-                return (
+                    return (
                   <button key={pid} className={`steal-btn ${myVote === pid ? 'picked' : ''}`} disabled={!DEMO && !p.words?.[me]} onClick={() => liarVote(code, room, pid)}>
                     <span className="avatar sm" style={{ background: pl.color }}>
                       {pl.name.slice(0, 1)}
                     </span>
                     <span className="pname">{pl.name}</span>
-                    {n > 0 && <span className="tag">{n}표</span>}
-                    {myVote === pid && <span className="me-tag">내 표</span>}
+                        {myVote === pid && <span className="me-tag">내 표</span>}
                   </button>
                 )
               })}
