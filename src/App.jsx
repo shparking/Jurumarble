@@ -64,6 +64,7 @@ const KIND_LABEL = {
   hunmin: '훈민정음 게임',
   vote: '다수결 지목',
   choose: '게임 선택권',
+  shuffle: '의리주 순서',
 }
 
 function useTheme() {
@@ -302,6 +303,43 @@ function HunminPanel({ room, pending: p, iAct, code, keyId }) {
             <div className="waiting">{actor?.name}이(가) 진행 중…</div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// 의리주: 3, 2, 1 → 무작위 순서 공개
+function ShufflePanel({ room, pending: p, iAct, code }) {
+  const step = useCountdown(`${p.startedAt}`)
+  if (step > 0) return <CountOverlay step={step} emoji="🥂" sub="의리주 순서를 정하고 있어요…" />
+  const order = (p.order || []).filter((pid) => room.players[pid]?.name)
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">🥂 의리주</div>
+        <h2>이 순서로 마셔요!</h2>
+        <div className="shuffle-list">
+          {order.map((pid, i) => (
+            <div key={pid} className="shuffle-row">
+              <span className="order">{i + 1}</span>
+              <span className="avatar sm" style={{ background: room.players[pid].color }}>
+                {room.players[pid].name.slice(0, 1)}
+              </span>
+              <span className="pname">{room.players[pid].name}</span>
+              {i === 0 && <span className="tag">첫 잔</span>}
+              {i === order.length - 1 && order.length > 1 && <span className="tag tag-gray">마지막</span>}
+            </div>
+          ))}
+        </div>
+        <div className="actions">
+          {iAct ? (
+            <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+              확인
+            </button>
+          ) : (
+            <div className="waiting">{room.players[p.playerId]?.name}이(가) 확인하면 다음 차례로</div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -1115,13 +1153,16 @@ export default function App() {
       {/* ---------- 다수결 지목 ---------- */}
       {room && showPending && pending.kind === 'vote' && <VotePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
 
+      {/* ---------- 의리주 순서 ---------- */}
+      {room && showPending && pending.kind === 'shuffle' && <ShufflePanel room={room} pending={pending} iAct={iAct} code={code} />}
+
       {/* ---------- 훈민정음 ---------- */}
       {room && showPending && pending.kind === 'hunmin' && (
         <HunminPanel room={room} pending={pending} iAct={iAct} code={code} keyId={`${room.lastMove?.id}-${pending.pos.idx}-${pending.title || ''}`} />
       )}
 
       {/* ---------- 도착 칸 모달 ---------- */}
-      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
+      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin', 'shuffle'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>

@@ -9,7 +9,7 @@ export const BRIDGE_ENTRANCE = 14 // 이 칸에 정확히 멈추면 다음 턴�
 export const BRIDGE_EXIT = 29 // 다리 마지막 칸 다음에 도착하는 칸
 
 // type: normal | nop(놉카드 지급) | move(delta) | goStart(출발로) | rest(휴식) | home(출발) | travel(세계여행: 원하는 칸으로)
-// locked: true 인 칸(출발·세계여행·이동 칸)은 방장도 편집 불가. 그 외 칸은 편집하면 '일반 칸'이 됨
+// locked: true 인 칸(출발·세계여행·앞으로 3칸·뒤로 1칸)은 방장도 편집 불가. 그 외 칸은 편집하면 '일반 칸'이 됨
 export const DEFAULT_CELLS = [
   { id: 0, emoji: '🚩', text: '출발', type: 'home', locked: true },
   { id: 1, emoji: '📝', text: '훈민정음 게임', type: 'hunmin' },
@@ -18,7 +18,7 @@ export const DEFAULT_CELLS = [
   { id: 4, emoji: '🍻', text: '다같이 마셔!' },
   { id: 5, emoji: '⏩', text: '앞으로 3칸', type: 'move', delta: 3, locked: true },
   { id: 6, emoji: '☕', text: '휴식', type: 'rest' },
-  { id: 7, emoji: '↩️', text: '출발로 다시 이동', type: 'goStart', locked: true },
+  { id: 7, emoji: '🖐️', text: '손병호 게임' },
   { id: 8, emoji: '👉', text: '너! 마셔! (지목)' },
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 10, emoji: '🎁', text: '게임 선택권', type: 'choose' },
@@ -30,8 +30,8 @@ export const DEFAULT_CELLS = [
   { id: 16, emoji: '0️⃣', text: '제로 게임' },
   { id: 17, emoji: '🙅', text: '나 빼고 마셔!' },
   { id: 18, emoji: '🐰', text: '바니바니 게임' },
-  { id: 19, emoji: '🥂', text: '의리주 마셔! (글라스에)' },
-  { id: 20, emoji: '⏪', text: '뒤로 2칸', type: 'move', delta: -2, locked: true },
+  { id: 19, emoji: '🥂', text: '의리주 마셔!\n(글라스에)', type: 'shuffle' },
+  { id: 20, emoji: '🎁', text: '게임 선택권', type: 'choose' },
   { id: 21, emoji: '🍶', text: '00년생 마셔!' },
   { id: 22, emoji: '🍶', text: '99년생 마셔!' },
   { id: 23, emoji: '🥃', text: '혼술 마셔!' },

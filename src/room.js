@@ -272,6 +272,12 @@ function makePending(room, playerId, pos, kind, title) {
   if (kind === 'liar') p.stage = 'category' // category → reveal → vote → result
   if (kind === 'hunmin') p.chosung = pickChosung()
   if (kind === 'vote') p.stage = 'vote' // vote → result
+  if (kind === 'shuffle') {
+    // 의리주: 방에 있는 사람들 순서를 무작위로
+    const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
+    p.order = shuffle(ids)
+    p.startedAt = Date.now()
+  }
   if (kind === 'choose') p.stage = 'choose'
   if (kind === 'aiPick') {
     // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
@@ -413,7 +419,7 @@ export async function resolvePending(code, room, action, target) {
   if (action === 'nop-use') {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
     if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
-    if (p.kind === 'vote' || p.kind === 'choose') return
+    if (p.kind === 'vote' || p.kind === 'choose' || p.kind === 'shuffle') return
     await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${id}/nop`]: Math.max(0, (me.nop || 0) - 1),
@@ -526,6 +532,13 @@ export async function resolvePending(code, room, action, target) {
           event: { id: newId(), text: `🗳️ 다수결 지목 → ${winners.map((w) => room.players[w]?.name).join(', ')} 마셔! 🍶` },
         })
       }
+      return
+    }
+    case 'shuffle': {
+      await roomUpdate(code, {
+        ...nextTurnUpdates(room),
+        event: { id: newId(), text: `🥂 의리주 순서: ${(p.order || []).map((pid) => room.players[pid]?.name).filter(Boolean).join(' → ')}` },
+      })
       return
     }
     case 'hunmin': {
