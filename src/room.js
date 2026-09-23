@@ -572,5 +572,5 @@ export function liarResult(room, p) {
   const top = sorted[0]
   const unique = top && (!sorted[1] || sorted[1][1] < top[1])
   const caught = !!(unique && top[0] === p.liar)
-  return { tally, top: top?.[0] || null, caught }
+  return { tally, top: top?.[0] || null, tie: !!(top && !unique), caught }
 }

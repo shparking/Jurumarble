@@ -293,7 +293,7 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
                 </span>
               </div>
               <div className="muted">
-                {res.top ? `최다 득표: ${room.players[res.top]?.name}` : '투표 없음'} ·{' '}
+                {res.tie ? '동점이라 라이어를 못 찾았어요' : res.top ? `최다 득표: ${room.players[res.top]?.name}` : '투표 없음'} ·{' '}
                 {res.caught ? `라이어 ${room.players[p.liar]?.name} 마셔! 🍶` : `${room.players[p.liar]?.name} 빼고 다 마셔! 🍻`}
               </div>
             </div>
