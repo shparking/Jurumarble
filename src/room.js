@@ -14,6 +14,7 @@ import { DEFAULT_CELLS, DEFAULT_BRIDGE, LAYOUTS, MAIN_COUNT, computePath, cellAt
 import { BALANCE_TOPICS } from './game/balance'
 import { pickLiarWords } from './game/liar'
 import { pickBombTopic } from './game/bomb'
+import { drawMission, MISSION_CHANCE } from './game/missions'
 import { autoEmoji } from './game/emoji'
 
 export const COLORS = ['#ea002c', '#2f6df6', '#1fa97a', '#f59e0b', '#8b5cf6', '#ec4899', '#0ea5e9', '#84cc16', '#14b8a6', '#f97316']
@@ -240,6 +241,8 @@ export async function startGame(code, room) {
     status: 'playing',
     order,
     turn: 0,
+    proxy: null,
+    mission: null,
     pos: room.pos || { track: 'main', idx: 0 },
     pending: null,
     lastMove: null,
@@ -293,7 +296,12 @@ function makePending(room, playerId, pos, kind, title) {
     p.topic = pickBombTopic()
   }
   if (kind === 'reaction') p.stage = 'ready' // ready → armed(goAt) → result
-  if (kind === 'gamble') p.stage = 'ask' // ask → spin(roulette, revealedAt)
+  if (kind === 'gamble') {
+    // ask → spin(roulette, revealedAt). 놉카드가 0장이면 선택 없이 바로 룰렛
+    const nop = room.players?.[playerId]?.nop || 0
+    if (nop > 0) p.stage = 'ask'
+    else Object.assign(p, { stage: 'spin', roulette: Math.random() < 0.5 ? 'win' : 'lose', revealedAt: Date.now(), nopAtSpin: 0 })
+  }
   if (kind === 'option') {
     const cell = cellAt(roomCells(room), roomBridge(room), pos)
     if (cell.pair) {
@@ -408,12 +416,78 @@ export async function rollDice(code, room) {
     updates.event = { id: newId(), text: `${room.players[id].name} 놉카드 1장 획득 🎫` }
   }
   withReleaseUpdates(room, updates.pending, updates, room.players[id].name)
+  maybeMission(room, updates)
   await roomUpdate(code, withTopicUpdates(room, updates.pending, updates))
 }
 
+// 돌발 미션: 진행 중인 미션이 없을 때 10% 확률로 한 명에게 몰래 전달 (데모: ?mission=초 로 강제)
+function maybeMission(room, updates) {
+  if (room.mission) return
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  if (ids.length < 2) return
+  const forced = DEMO ? parseInt(new URLSearchParams(window.location.search).get('mission'), 10) : NaN
+  if (!(forced > 0) && Math.random() >= MISSION_CHANCE) return
+  const who = ids[Math.floor(Math.random() * ids.length)]
+  const others = ids.filter((pid) => pid !== who)
+  const targetName = room.players[others[Math.floor(Math.random() * others.length)]]?.name || ''
+  const m = drawMission(targetName)
+  const dur = forced > 0 ? forced * 1000 : m.minutes * 60 * 1000
+  const nowMs = serverNow()
+  updates.mission = { id: newId(), playerId: who, text: m.text, detail: m.detail, minutes: m.minutes, choices: m.choices, answer: m.answer, startedAt: nowMs, endsAt: nowMs + dur, stage: 'active' }
+  updates[`log/${newId()}`] = { t: Date.now(), text: `🎯 누군가에게 돌발 미션이 주어졌습니다! (${m.minutes}분)` }
+}
+
+// 방장: 미션 시간이 끝나면 퀴즈 단계로
+export async function missionTick(code, room) {
+  const m = room.mission
+  if (!m || m.stage !== 'active' || room.hostId !== myId()) return
+  if (serverNow() < m.endsAt) return
+  await roomUpdate(code, { 'mission/stage': 'quiz', event: { id: newId(), text: `⏰ ${room.players[m.playerId]?.name}의 미션 수행 시간이 끝났습니다!` } })
+}
+// 수행자 외 참가자: 5지선다 투표
+export async function missionVote(code, room, idx) {
+  const m = room.mission
+  if (!m || m.stage !== 'quiz') return
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name && pid !== m.playerId)
+  const id = DEMO ? ids.find((pid) => m.votes?.[pid] == null) : myId()
+  if (!id || !ids.includes(id)) return
+  await roomUpdate(code, { [`mission/votes/${id}`]: idx })
+}
+// 결과 공개 (수행자 또는 방장)
+export async function missionReveal(code, room) {
+  const m = room.mission
+  if (!m || m.stage !== 'quiz') return
+  if (!DEMO && myId() !== m.playerId && myId() !== room.hostId) return
+  await roomUpdate(code, { 'mission/stage': 'result', 'mission/revealedAt': Date.now() })
+}
+// 결과 계산: 투표자 과반이 맞히면 수행자 마시기, 아니면 틀린 사람들 마시기
+export function missionResult(room, m) {
+  const votes = m.votes || {}
+  const voters = Object.keys(votes)
+  const correct = voters.filter((pid) => votes[pid] === m.answer)
+  const wrong = voters.filter((pid) => votes[pid] !== m.answer)
+  const caught = voters.length > 0 && correct.length * 2 >= voters.length
+  return { voters, correct, wrong, caught }
+}
+export async function missionDone(code, room) {
+  const m = room.mission
+  if (!m || m.stage !== 'result') return
+  if (!DEMO && myId() !== m.playerId && myId() !== room.hostId) return
+  const r = missionResult(room, m)
+  const who = room.players[m.playerId]?.name
+  const text = r.caught
+    ? `🎯 돌발 미션 "${m.text}" — 들켰다! ${who} 마셔 🍶`
+    : `🎯 돌발 미션 "${m.text}" — 못 맞힘! ${r.wrong.map((pid) => room.players[pid]?.name).filter(Boolean).join(', ') || '아무도'} 마셔 🍶`
+  await roomUpdate(code, { mission: null, event: { id: newId(), text } })
+}
+
+
 function nextTurnUpdates(room) {
   const order = roomOrder(room)
-  return { turn: ((room.turn || 0) + 1) % Math.max(1, order.length), pending: null }
+  const upd = { turn: ((room.turn || 0) + 1) % Math.max(1, order.length), pending: null }
+  // 대리기사: 대신 받기로 한 차례가 끝나면 해제
+  if (room.proxy && room.proxy.turn === (room.turn || 0)) upd.proxy = null
+  return upd
 }
 
 // 도착 칸 모달의 버튼 처리. action: 'done' | 'nop-use' | 'pick'(travel, target)
@@ -557,7 +631,7 @@ export async function resolvePending(code, room, action, target) {
     }
     case 'choose': {
       // 게임 선택권: 'choose' + target(balance|liar|hunmin) → 그 게임으로 전환
-      const titles = { balance: '밸런스 게임', liar: '라이어 게임', hunmin: '훈민정음 게임' }
+      const titles = { balance: '밸런스 게임', liar: '라이어 게임', hunmin: '훈민정음 게임', bomb: '폭탄 돌리기', reaction: '반응속도 게임' }
       if (action === 'choose' && titles[target]) {
         const np = makePending(room, id, p.pos, target, titles[target])
         await roomUpdate(code, withTopicUpdates(room, np, { pending: np, event: { id: newId(), text: `${me.name} 🎁 ${titles[target]} 선택!` } }))
@@ -714,6 +788,18 @@ export async function resolvePending(code, room, action, target) {
       }
       return
     }
+    case 'proxy': {
+      // 대리기사: 다음 차례 사람의 벌칙을 내가 대신 수행
+      const order = roomOrder(room)
+      const nextTurn = ((room.turn || 0) + 1) % Math.max(1, order.length)
+      const nextId = order[nextTurn]
+      await roomUpdate(code, {
+        ...nextTurnUpdates(room),
+        proxy: { byId: id, byName: me.name, forId: nextId, forName: room.players[nextId]?.name || '', turn: nextTurn },
+        event: { id: newId(), text: `🚗 대리기사 ${me.name} — ${room.players[nextId]?.name || '다음 사람'}의 벌칙을 대신 받아요!` },
+      })
+      return
+    }
     case 'normal': {
       await roomUpdate(code, {
         ...nextTurnUpdates(room),
@@ -727,13 +813,14 @@ export async function resolvePending(code, room, action, target) {
 }
 
 // 놉카드 언제든 사용 (본인 것만)
-export async function useNopAnytime(code, room) {
-  const id = myId()
-  const me = room.players?.[id]
-  if (!me || (me.nop || 0) <= 0) return
+// 놉카드 수동 사용: 순서 목록에서 배지를 눌러 (누구나) 그 사람의 카드를 1장 사용 → 전원 알림
+export async function useNopAnytime(code, room, targetId) {
+  const id = targetId || myId()
+  const t = room.players?.[id]
+  if (!t || (t.nop || 0) <= 0) return
   await roomUpdate(code, {
-    [`players/${id}/nop`]: me.nop - 1,
-    event: { id: newId(), text: `${me.name} 놉카드 사용! 🙅` },
+    [`players/${id}/nop`]: t.nop - 1,
+    event: { id: newId(), text: `🎫 ${t.name}님이 놉카드를 사용했습니다!` },
   })
 }
 
@@ -764,7 +851,7 @@ export async function hostSkipTurn(code, room) {
 
 export async function restartGame(code, room) {
   if (room.hostId !== myId()) return
-  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null, log: null }
+  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null, log: null, mission: null, proxy: null }
   Object.keys(room.players || {}).forEach((pid) => (updates[`players/${pid}/nop`] = 0))
   await roomUpdate(code, updates)
 }

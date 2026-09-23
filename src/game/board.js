@@ -23,7 +23,7 @@ export const DEFAULT_CELLS = [
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 10, emoji: '🎁', text: '게임 선택권', type: 'choose' },
   { id: 11, emoji: '🍶', text: '박상혁만 마셔!' },
-  { id: 12, emoji: '⚙️', text: '10분 영어금지', type: 'option', minutes: 10 },
+  { id: 12, emoji: '⚙️', text: '영어금지', type: 'option', minutes: 10 },
   { id: 13, emoji: '🤥', text: '라이어 게임', type: 'liar' },
   { id: 14, emoji: '🔓', text: '옵션 해제', type: 'release' },
   { id: 15, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
@@ -47,7 +47,7 @@ export const DEFAULT_CELLS = [
 
 // 지름길(다리) 칸: 3번 위에서 시작, 화면 번호 32~37
 export const DEFAULT_BRIDGE = [
-  { id: 'b0', emoji: '🚗', text: '대리 기사' },
+  { id: 'b0', emoji: '🚗', text: '대리 기사', type: 'proxy' },
   { id: 'b1', emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 'b2', emoji: '⚙️', text: '연대책임', type: 'option', minutes: 10, pair: true },
   { id: 'b3', emoji: '🔮', text: '텔레파시 게임' },

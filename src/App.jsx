@@ -44,6 +44,11 @@ import {
   reactionRanking,
   watchServerOffset,
   serverNow,
+  missionTick,
+  missionVote,
+  missionReveal,
+  missionResult,
+  missionDone,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -74,6 +79,7 @@ const KIND_LABEL = {
   bomb: '폭탄 돌리기',
   reaction: '반응속도 게임',
   gamble: '놉카드 도박',
+  proxy: '대리 기사',
 }
 
 function useTheme() {
@@ -223,7 +229,7 @@ function AiPickOverlay({ room, pending, me, iAct, onDone, onTargetNop }) {
   const target = room.players[pending.target]
   const isTarget = DEMO || pending.target === me
   return (
-    <CongratsOverlay room={room} targets={[pending.target]} actorId={pending.playerId} iAct={iAct} canNop={isTarget && (target?.nop || 0) > 0} onDone={onDone} onTargetNop={onTargetNop} />
+    <CongratsOverlay room={room} targets={[pending.target]} actorId={pending.playerId} iAct={iAct} canNop={false} onDone={onDone} onTargetNop={onTargetNop} />
   )
 }
 
@@ -244,7 +250,7 @@ function VotePanel({ room, pending: p, me, iAct, code }) {
         targets={winners}
         actorId={p.playerId}
         iAct={iAct}
-        canNop={canNop}
+        canNop={false}
         onDone={() => resolvePending(code, room, 'done')}
         onTargetNop={() => resolvePending(code, room, 'target-nop')}
         title={winners.length > 1 ? '🎉 동점! Congratulations! 🎉' : '🎉 Congratulations! 🎉'}
@@ -301,11 +307,6 @@ function HunminPanel({ room, pending: p, iAct, code, keyId }) {
         </div>
         {iAct ? (
           <div className="actions">
-            {(actor?.nop || 0) > 0 && (
-              <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
-                <NopIcon /> 놉카드 사용
-              </button>
-            )}
             <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
               수행 완료
             </button>
@@ -359,7 +360,7 @@ function BalancePanel({ room, pending: p, me, iAct, code }) {
         targets={r.losers}
         actorId={p.playerId}
         iAct={iAct}
-        canNop={canNop}
+        canNop={false}
         refused={p.refused || {}}
         note={`${ta} ${r.a} : ${r.b} ${tb} · 소수 의견`}
         onDone={() => resolvePending(code, room, 'done')}
@@ -420,11 +421,6 @@ function BalancePanel({ room, pending: p, me, iAct, code }) {
                   <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'reroll')} title="다른 주제">
                     🔄 다른 주제
                   </button>
-                  {(actor?.nop || 0) > 0 && (
-                    <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
-                      <NopIcon /> 놉카드 사용
-                    </button>
-                  )}
                   <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount < Math.min(2, ids.length)}>
                     결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
                   </button>
@@ -639,11 +635,6 @@ function BombPanel({ room, pending: p, iAct, code }) {
         <div className="actions">
           {iAct ? (
             <>
-              {(actor?.nop || 0) > 0 && (
-                <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
-                  <NopIcon /> 놉카드 사용
-                </button>
-              )}
               <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'start')}>
                 💣 폭탄 시작
               </button>
@@ -751,11 +742,6 @@ function ReactionPanel({ room, pending: p, me, iAct, code }) {
         <div className="actions">
           {iAct ? (
             <>
-              {(actor?.nop || 0) > 0 && (
-                <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
-                  <NopIcon /> 놉카드 사용
-                </button>
-              )}
               <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'start')}>
                 ⚡ 시작
               </button>
@@ -966,6 +952,150 @@ function BalanceTopic({ topic }) {
   )
 }
 
+// 돌발 미션: 진행 배너(전원) + 수행자 전용 미션 보기
+function MissionBanner({ room, me }) {
+  const m = room.mission
+  const [, tick] = useState(0)
+  const [show, setShow] = useState(false)
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
+  useEffect(() => setShow(false), [m?.id])
+  if (!m || m.stage !== 'active') return null
+  const left = Math.max(0, m.endsAt - serverNow())
+  const mm = String(Math.floor(left / 60000)).padStart(2, '0')
+  const ss = String(Math.floor((left % 60000) / 1000)).padStart(2, '0')
+  const mine = DEMO || m.playerId === me
+  const pct = Math.max(0, Math.min(100, (left / (m.minutes * 60000)) * 100))
+  return (
+    <div className="timers">
+      <div className={`timer mission ${left < 30000 ? 'soon' : ''}`} onClick={() => mine && setShow((v) => !v)} role={mine ? 'button' : undefined}>
+        <div className="timer-bar" style={{ width: `${pct}%` }} />
+        <span className="timer-text">🎯 {mine ? (show ? m.detail : '내 돌발 미션 · 탭해서 보기') : '누군가에게 돌발 미션이 주어졌습니다!'}</span>
+        <span className="timer-who">{mine ? (show ? '탭해서 숨기기' : '🤫') : '???'}</span>
+        <span className="timer-time">
+          {mm}:{ss}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// 돌발 미션: 수행자에게 처음 한 번 크게 알림
+function MissionCard({ room, me, onClose }) {
+  const m = room.mission
+  if (!m || m.stage !== 'active' || !(DEMO || m.playerId === me)) return null
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="kicker">🤫 당신에게 돌발 미션!</div>
+        <h2>{m.detail}</h2>
+        <div className="muted">
+          {m.minutes}분 안에 아무도 눈치 못 채게 수행하세요. 시간이 끝나면 다른 사람들이 어떤 미션이었는지 5지선다로 맞혀요. 절반 이상이 맞히면 당신이, 못 맞히면 틀린 사람들이 마셔요.
+        </div>
+        <div className="actions">
+          <button className="btn btn-primary" onClick={onClose}>
+            알겠어요, 시작!
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 돌발 미션: 시간 종료 → 수행자 공개 → 5지선다 → 3·2·1 → 결과
+function MissionQuiz({ room, me, code }) {
+  const m = room.mission
+  const step = useCountdown(m?.stage === 'result' ? `${m.revealedAt}` : 'x')
+  if (!m || (m.stage !== 'quiz' && m.stage !== 'result')) return null
+  const who = room.players[m.playerId]
+  const isPerformer = !DEMO && m.playerId === me
+  const canControl = DEMO || isPerformer || room.hostId === me
+  const voters = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name && pid !== m.playerId)
+  const votes = m.votes || {}
+  const votedCount = voters.filter((pid) => votes[pid] != null).length
+  const myVote = DEMO ? null : votes[me]
+  if (m.stage === 'result') {
+    if (step > 0) return <CountOverlay step={step} emoji="🎯" sub="정답을 공개합니다…" />
+    const r = missionResult(room, m)
+    return (
+      <div className="modal-backdrop">
+        <div className="modal">
+          <div className="kicker">🎯 돌발 미션 결과</div>
+          <h2>{r.caught ? '들켰다! 😳' : '아무도 못 맞혔다! 😎'}</h2>
+          <div className="mission-answer">
+            <span className="muted">{who?.name}의 미션</span>
+            <b>{m.text}</b>
+          </div>
+          <div className="steal-list">
+            {voters.map((pid) => {
+              const v = votes[pid]
+              const ok = v === m.answer
+              return (
+                <div key={pid} className={`steal-btn ${v == null ? 'none' : ok ? 'picked' : 'wrong'}`}>
+                  <span className="avatar sm" style={{ background: room.players[pid].color }}>
+                    {room.players[pid].name.slice(0, 1)}
+                  </span>
+                  <span className="pname">{room.players[pid].name}</span>
+                  <span className={`tag ${ok ? '' : 'tag-gray'}`}>{v == null ? '미투표' : ok ? '정답 ✓' : m.choices[v]}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="muted" style={{ marginTop: 10 }}>
+            {r.caught ? `절반 이상이 맞혔어요 → ${who?.name} 마셔! 🍶` : `${r.wrong.length ? r.wrong.map((pid) => room.players[pid]?.name).join(', ') + ' 마셔! 🍶' : '아무도 안 마셔요 😇'}`}
+          </div>
+          <div className="actions">
+            {canControl ? (
+              <button className="btn btn-primary" onClick={() => missionDone(code, room)}>
+                확인
+              </button>
+            ) : (
+              <div className="waiting">{who?.name} 또는 방장이 확인하면 닫혀요</div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">🎯 돌발 미션</div>
+        <h2>
+          <b style={{ color: who?.color }}>{who?.name}</b>의 미션 수행 시간이 끝났습니다!
+        </h2>
+        <div className="muted">어떤 미션이 주어졌을까요? ({votedCount}/{voters.length} 투표)</div>
+        {isPerformer ? (
+          <div className="mission-answer">
+            <span className="muted">내 미션</span>
+            <b>{m.detail}</b>
+          </div>
+        ) : (
+          <div className="choice-list">
+            {m.choices.map((c, i) => (
+              <button key={i} className={`choice ${myVote === i ? 'on' : ''}`} onClick={() => missionVote(code, room, i)}>
+                <span className="choice-no">{i + 1}</span>
+                <span>{c}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="actions">
+          {canControl ? (
+            <button className="btn btn-primary" onClick={() => missionReveal(code, room)} disabled={votedCount === 0}>
+              결과 공개 {votedCount < voters.length ? `(${votedCount}/${voters.length})` : ''}
+            </button>
+          ) : (
+            <div className="waiting">모두 고르면 {who?.name}이(가) 결과를 공개해요</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // 진행 중인 옵션 타이머 (모든 폰에 표시, 1초마다 갱신)
 function OptionTimers({ options }) {
   const [, tick] = useState(0)
@@ -1028,6 +1158,8 @@ function DebugPanel({ room, code, me, connected }) {
       pending: room.pending,
       lastMove: room.lastMove && { id: room.lastMove.id, dice: room.lastMove.dice, len: room.lastMove.path?.length },
       options: room.options,
+      mission: room.mission && { stage: room.mission.stage, playerId: room.mission.playerId, endsIn: Math.round((room.mission.endsAt - Date.now()) / 1000), text: room.mission.text },
+      serverOffset: serverNow() - Date.now(),
       event: room.event?.text,
     },
     errors: errLog.slice(-20),
@@ -1100,6 +1232,9 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [peek, setPeek] = useState(null)
   const [showLog, setShowLog] = useState(false)
+  const [missionSeen, setMissionSeen] = useState(null) // 수행자가 확인한 미션 id
+  const [nopConfirm, setNopConfirm] = useState(null) // 놉카드 사용 확인 중인 참가자 id
+  const missionRef = useRef(null)
   const [editing, setEditing] = useState(null) // { pos, cell, text }
   const [rolling, setRolling] = useState(false)
   const [diceShow, setDiceShow] = useState(1)
@@ -1234,6 +1369,26 @@ export default function App() {
       setTimeout(() => setToast(null), 2000)
     }
   }, [room?.turn, room?.status, room?.order])
+
+  // 돌발 미션: 새 미션이 오면 전원 토스트 (수행자는 카드로 확인) / 방장은 시간 종료 감시
+  useEffect(() => {
+    const m = room?.mission
+    if (!m || m.stage !== 'active' || missionRef.current === m.id) return
+    missionRef.current = m.id
+    if (DEMO || m.playerId !== me) {
+      setToast('🎯 누군가에게 돌발 미션이 주어졌습니다!')
+      setTimeout(() => setToast(null), 2500)
+    } else {
+      try {
+        navigator.vibrate?.([60, 40, 60, 40, 60])
+      } catch {}
+    }
+  }, [room?.mission?.id, room?.mission?.stage])
+  useEffect(() => {
+    if (!room || room.hostId !== me || room.mission?.stage !== 'active') return
+    const t = setInterval(() => missionTick(code, room), 1000)
+    return () => clearInterval(t)
+  }, [room, me, code])
 
   // 대기실에서 1시간 넘게 시작하지 않은 내 방은 방장 기기가 스스로 닫음
   useEffect(() => {
@@ -1540,6 +1695,14 @@ export default function App() {
           </div>
 
           <OptionTimers options={room.options} />
+          <MissionBanner room={room} me={me} />
+          {room.proxy && room.proxy.turn === (room.turn || 0) && (
+            <div className="timers">
+              <div className="timer proxy">
+                <span className="timer-text">🚗 대리기사 {room.proxy.byName} — 이번 차례 {room.proxy.forName}의 벌칙을 대신 받아요</span>
+              </div>
+            </div>
+          )}
 
           <Board
             cells={cells}
@@ -1568,9 +1731,9 @@ export default function App() {
                     <span className="pname">{p.name}</span>
                     <button
                       className={`nop-badge ${(p.nop || 0) === 0 ? 'empty' : ''}`}
-                      onClick={() => mine && useNopAnytime(code, room)}
-                      disabled={!mine || (p.nop || 0) === 0}
-                      title={mine ? '놉카드 사용' : '놉카드 보유 수'}
+                      onClick={() => (p.nop || 0) > 0 && setNopConfirm(pid)}
+                      disabled={(p.nop || 0) === 0}
+                      title="놉카드 사용"
                     >
                       <NopIcon /> {p.nop || 0}
                     </button>
@@ -1613,6 +1776,12 @@ export default function App() {
       {/* ---------- 다수결 지목 ---------- */}
       {room && showPending && pending.kind === 'vote' && <VotePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
 
+      {/* ---------- 돌발 미션 ---------- */}
+      {room && room.status === 'playing' && room.mission?.stage === 'active' && missionSeen !== room.mission.id && !showPending && (
+        <MissionCard room={room} me={me} onClose={() => setMissionSeen(room.mission.id)} />
+      )}
+      {room && room.status === 'playing' && !showPending && <MissionQuiz room={room} me={me} code={code} />}
+
       {/* ---------- 폭탄 / 반응속도 / 놉카드 도박 ---------- */}
       {room && showPending && pending.kind === 'bomb' && <BombPanel room={room} pending={pending} iAct={iAct} code={code} />}
       {room && showPending && pending.kind === 'reaction' && <ReactionPanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
@@ -1654,6 +1823,8 @@ export default function App() {
                   ['balance', '⚖️', '밸런스 게임'],
                   ['liar', '🤥', '라이어 게임'],
                   ['hunmin', '📝', '훈민정음 게임'],
+                  ['bomb', '💣', '폭탄 돌리기'],
+                  ['reaction', '⚡', '반응속도 게임'],
                 ].map(([k, e, n]) => (
                   <button key={k} className="cat-btn" disabled={!iAct} onClick={() => resolvePending(code, room, 'choose', k)}>
                     <span className="cat-emo">{e}</span>
@@ -1668,14 +1839,15 @@ export default function App() {
             <div className="muted">
               <b style={{ color: room.players[pending.playerId]?.color }}>{room.players[pending.playerId]?.name}</b>
               {pending.kind === 'nop' && ' — 놉카드 1장이 지급되었어요.'}
-              {(pending.kind === 'normal' || pending.kind === 'balance') && (iAct ? ' — 수행하거나 놉카드로 거부할 수 있어요.' : ' — 수행 중이에요.')}
+              {(pending.kind === 'normal' || pending.kind === 'balance') && (iAct ? ' — 수행하고 완료를 눌러주세요.' : ' — 수행 중이에요.')}
               {pending.kind === 'option' &&
                 !pendingCell.pair &&
                 (room.options?.[`${pending.pos.track === 'main' ? 'm' : 'b'}${pending.pos.idx}`]?.endsAt > Date.now()
-                  ? ` — 이미 진행 중인 옵션이에요. 모두에게 ${pendingCell.minutes || 10}분이 추가됩니다. (놉카드 사용 불가)`
-                  : ` — 모두에게 적용되는 옵션이에요. ${pendingCell.minutes || 10}분 타이머가 전원 화면에 표시됩니다. (놉카드 사용 불가)`)}
-              {pending.kind === 'option' && pendingCell.pair && ` — 무작위로 정해진 짝과 ${pendingCell.minutes || 10}분 동안 벌칙을 함께 받아요. (놉카드 사용 불가)`}
+                  ? ` — 이미 진행 중인 옵션이에요. 모두에게 ${pendingCell.minutes || 10}분이 추가됩니다. `
+                  : ` — 모두에게 적용되는 옵션이에요. ${pendingCell.minutes || 10}분 타이머가 전원 화면에 표시됩니다. `)}
+              {pending.kind === 'option' && pendingCell.pair && ` — 무작위로 정해진 짝과 ${pendingCell.minutes || 10}분 동안 벌칙을 함께 받아요. `}
               {pending.kind === 'release' && ' — 진행 중이던 옵션 타이머가 모두 종료됐어요.'}
+              {pending.kind === 'proxy' && ` — 다음 차례(${room.players[roomOrder(room)[((room.turn || 0) + 1) % Math.max(1, roomOrder(room).length)]]?.name || '다음 사람'})가 받는 벌칙을 ${room.players[pending.playerId]?.name}이(가) 대신 수행해요! 🚗`}
               {pending.kind === 'steal' &&
                 (Object.entries(room.players).some(([pid, pl]) => pid !== pending.playerId && (pl.nop || 0) > 0)
                   ? iAct
@@ -1729,11 +1901,6 @@ export default function App() {
                     🔄 다른 주제
                   </button>
                 )}
-                {(pending.kind === 'normal' || pending.kind === 'balance' || pending.kind === 'liar') && (room.players[pending.playerId]?.nop || 0) > 0 && (
-                  <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
-                    <NopIcon /> 놉카드 사용
-                  </button>
-                )}
                 {!['liar', 'choose'].includes(pending.kind) && !(pending.kind === 'steal' && Object.entries(room.players).some(([pid, pl]) => pid !== pending.playerId && (pl.nop || 0) > 0)) && (
                 <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
                   {pending.kind === 'normal' || pending.kind === 'balance' ? '수행 완료' : pending.kind === 'option' ? (room.options?.[`${pending.pos.track === 'main' ? 'm' : 'b'}${pending.pos.idx}`]?.endsAt > Date.now() ? `⏱ +${pendingCell.minutes || 10}분 추가` : `⏱ ${pendingCell.minutes || 10}분 시작`) : pending.kind === 'travel' ? '칸 선택하기' : '확인'}
@@ -1745,6 +1912,33 @@ export default function App() {
                 <div className="waiting">{room.players[pending.playerId]?.name}의 선택을 기다리는 중…</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ---------- 놉카드 사용 확인 ---------- */}
+      {nopConfirm && room?.players?.[nopConfirm] && (
+        <div className="modal-backdrop" onClick={() => setNopConfirm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kicker">🎫 놉카드</div>
+            <h2>
+              <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b>님의 놉카드를 사용하시겠습니까?
+            </h2>
+            <div className="muted">보유 {room.players[nopConfirm].nop || 0}장 → {Math.max(0, (room.players[nopConfirm].nop || 0) - 1)}장. 사용하면 모두에게 알림이 떠요.</div>
+            <div className="actions">
+              <button className="btn btn-ghost" onClick={() => setNopConfirm(null)}>
+                아니요
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  useNopAnytime(code, room, nopConfirm)
+                  setNopConfirm(null)
+                }}
+              >
+                예, 사용
+              </button>
+            </div>
           </div>
         </div>
       )}
