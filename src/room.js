@@ -51,6 +51,29 @@ function shuffle(arr) {
 }
 
 const roomPath = (code) => `rooms/${code}`
+
+// 방 상태 갱신 + event 가 있으면 게임 로그(log/{id})에도 같이 기록
+export const LOG_MAX = 80
+function roomUpdate(code, updates) {
+  const ev = updates.event
+  if (ev && ev.id && ev.text) updates[`log/${ev.id}`] = { t: Date.now(), text: String(ev.text).replace(/\n/g, ' ') }
+  return dbUpdate(roomPath(code), updates)
+}
+// 로그 최신순 배열
+export function roomLog(room) {
+  return Object.entries(room?.log || {})
+    .map(([id, e]) => ({ id, ...e }))
+    .sort((a, b) => b.t - a.t)
+}
+// 방장: 로그가 너무 길면 오래된 것 삭제
+export async function trimLog(code, room) {
+  if (room.hostId !== myId()) return
+  const all = roomLog(room)
+  if (all.length <= LOG_MAX) return
+  const upd = {}
+  all.slice(LOG_MAX).forEach((e) => (upd[`log/${e.id}`] = null))
+  await dbUpdate(roomPath(code), upd)
+}
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
 // ---------- 방 만들기 / 입장 ----------
@@ -81,7 +104,7 @@ export async function createRoom(name, layout = 'landscape') {
     demoSeed(code, ['관희', '윤정', '민수'], COLORS)
     // 데모: ?demo=1&start=30 처럼 시작 칸 지정 (특정 칸 테스트용)
     const st = parseInt(new URLSearchParams(window.location.search).get('start'), 10)
-    if (!isNaN(st)) await dbUpdate(roomPath(code), { pos: { track: 'main', idx: ((st % MAIN_COUNT) + MAIN_COUNT) % MAIN_COUNT } })
+    if (!isNaN(st)) await roomUpdate(code, { pos: { track: 'main', idx: ((st % MAIN_COUNT) + MAIN_COUNT) % MAIN_COUNT } })
     // 데모: &opt=m12,m29 처럼 진행 중인 옵션 타이머를 미리 만들어 둠
     const opt = new URLSearchParams(window.location.search).get('opt')
     if (opt) {
@@ -90,7 +113,7 @@ export async function createRoom(name, layout = 'landscape') {
         const cell = k.startsWith('m') ? DEFAULT_CELLS[+k.slice(1)] : DEFAULT_BRIDGE[+k.slice(1)]
         if (cell) upd[`options/${k}`] = { text: optionLabel(cell), startedAt: Date.now(), endsAt: Date.now() + (7 - i * 3) * 60000, minutes: 10 }
       })
-      await dbUpdate(roomPath(code), upd)
+      await roomUpdate(code, upd)
     }
   }
   return code
@@ -122,7 +145,7 @@ export async function leaveRoom(code) {
     await dbRemove(`rooms/${code}/players/${id}`)
     const rest = Object.keys(room.players || {}).filter((p) => p !== id)
     if (rest.length === 0) await dbRemove(roomPath(code))
-    else if (room.hostId === id) await dbUpdate(roomPath(code), { hostId: rest[0] })
+    else if (room.hostId === id) await roomUpdate(code, { hostId: rest[0] })
   }
 }
 
@@ -183,18 +206,18 @@ export async function moveOrder(code, room, playerId, dir) {
   const j = i + dir
   if (i < 0 || j < 0 || j >= order.length) return
   ;[order[i], order[j]] = [order[j], order[i]]
-  await dbUpdate(roomPath(code), { order, orderSet: true })
+  await roomUpdate(code, { order, orderSet: true })
 }
 
 // 방장: 순서 랜덤으로 섞기 (대기실)
 export async function shuffleOrder(code, room) {
   if (room.hostId !== myId() || room.status !== 'lobby') return
-  await dbUpdate(roomPath(code), { order: shuffle(lobbyOrder(room)), orderSet: true })
+  await roomUpdate(code, { order: shuffle(lobbyOrder(room)), orderSet: true })
 }
 
 export async function startGame(code, room) {
   const order = room.orderSet ? lobbyOrder(room) : shuffle(lobbyOrder(room))
-  await dbUpdate(roomPath(code), {
+  await roomUpdate(code, {
     status: 'playing',
     order,
     turn: 0,
@@ -275,7 +298,7 @@ export async function clearExpiredOptions(code, room) {
   const updates = {}
   expired.forEach(([k]) => (updates[`options/${k}`] = null))
   updates.event = { id: newId(), text: `⏰ ${expired.map(([, o]) => o.text).join(', ')} 끝!` }
-  await dbUpdate(roomPath(code), updates)
+  await roomUpdate(code, updates)
 }
 
 // 밸런스 주제가 정해질 때 usedTopics 갱신을 updates에 포함
@@ -293,7 +316,7 @@ export async function rerollTopic(code, room) {
   const id = DEMO ? p?.playerId : myId()
   if (!p || p.kind !== 'balance' || p.playerId !== id) return
   const next = { ...p, topic: pickTopic(room) }
-  await dbUpdate(roomPath(code), withTopicUpdates(room, next, { pending: next }))
+  await roomUpdate(code, withTopicUpdates(room, next, { pending: next }))
 }
 
 export async function rollDice(code, room) {
@@ -312,12 +335,15 @@ export async function rollDice(code, room) {
     pending: pendingFor(room, id, finalPos),
   }
   const cell = cellAt(roomCells(room), roomBridge(room), finalPos)
+  // 로그: 주사위 결과 (토스트 없이 기록만)
+  const cellNo = finalPos.track === 'main' ? `${finalPos.idx}번` : `${32 + finalPos.idx}번`
+  updates[`log/${newId()}`] = { t: Date.now(), text: `${room.players[id].name} 🎲 ${value} → ${cellNo} ${String(cell.text).replace(/\n/g, ' ')}` }
   if ((cell.type || 'normal') === 'nop') {
     updates[`players/${id}/nop`] = (room.players[id]?.nop || 0) + 1
     updates.event = { id: newId(), text: `${room.players[id].name} 놉카드 1장 획득 🎫` }
   }
   withReleaseUpdates(room, updates.pending, updates, room.players[id].name)
-  await dbUpdate(roomPath(code), withTopicUpdates(room, updates.pending, updates))
+  await roomUpdate(code, withTopicUpdates(room, updates.pending, updates))
 }
 
 function nextTurnUpdates(room) {
@@ -336,7 +362,7 @@ export async function resolvePending(code, room, action, target) {
     if (tid !== p.target) return
     const t = room.players[tid]
     if (!t || (t.nop || 0) <= 0) return
-    await dbUpdate(roomPath(code), {
+    await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${tid}/nop`]: t.nop - 1,
       event: { id: newId(), text: `${t.name} 놉카드 사용! AI 지목 거부 🙅` },
@@ -355,7 +381,7 @@ export async function resolvePending(code, room, action, target) {
   if (action === 'nop-use') {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
     if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
-    await dbUpdate(roomPath(code), {
+    await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${id}/nop`]: Math.max(0, (me.nop || 0) - 1),
       event: { id: newId(), text: `${me.name} 놉카드 사용! "${cell.text}" 거부 🙅` },
@@ -382,11 +408,11 @@ export async function resolvePending(code, room, action, target) {
         updates.event = { id: newId(), text: `${me.name} ${d > 0 ? `앞으로 ${d}칸` : `뒤로 ${-d}칸`} → 놉카드 1장 획득 🎫` }
       }
       withReleaseUpdates(room, updates.pending, updates, me.name)
-      await dbUpdate(roomPath(code), withTopicUpdates(room, updates.pending, updates))
+      await roomUpdate(code, withTopicUpdates(room, updates.pending, updates))
       return
     }
     case 'goStart': {
-      await dbUpdate(roomPath(code), {
+      await roomUpdate(code, {
         ...nextTurnUpdates(room),
         pos: { track: 'main', idx: 0 },
         lastMove: { id: newId(), playerId: id, from: room.pos, path: [{ track: 'main', idx: 0 }] },
@@ -406,10 +432,10 @@ export async function resolvePending(code, room, action, target) {
         if ((dest.type || 'normal') === 'travel') Object.assign(updates, nextTurnUpdates(room))
         if ((dest.type || 'normal') === 'nop') updates[`players/${id}/nop`] = (me.nop || 0) + 1
         withReleaseUpdates(room, updates.pending, updates, me.name)
-        await dbUpdate(roomPath(code), withTopicUpdates(room, updates.pending, updates))
+        await roomUpdate(code, withTopicUpdates(room, updates.pending, updates))
       } else {
         // '칸 선택하기' 버튼 → 선택 모드로
-        await dbUpdate(roomPath(code), { pending: { ...p, kind: 'picking' } })
+        await roomUpdate(code, { pending: { ...p, kind: 'picking' } })
       }
       return
     }
@@ -418,13 +444,13 @@ export async function resolvePending(code, room, action, target) {
       return
     }
     case 'option': {
-      await dbUpdate(roomPath(code), optionStartUpdates(room, cell, p.pos, me, id, { ...nextTurnUpdates(room) }))
+      await roomUpdate(code, optionStartUpdates(room, cell, p.pos, me, id, { ...nextTurnUpdates(room) }))
       return
     }
     case 'steal': {
       // action === 'steal' + target(playerId): 그 사람 놉카드 1장을 내게로
       if (action === 'steal' && target && room.players[target] && (room.players[target].nop || 0) > 0 && target !== id) {
-        await dbUpdate(roomPath(code), {
+        await roomUpdate(code, {
           ...nextTurnUpdates(room),
           [`players/${target}/nop`]: room.players[target].nop - 1,
           [`players/${id}/nop`]: (me.nop || 0) + 1,
@@ -434,12 +460,12 @@ export async function resolvePending(code, room, action, target) {
       }
       // 가져올 사람이 없을 때 '확인'
       const anyone = Object.entries(room.players || {}).some(([pid, pl]) => pid !== id && (pl.nop || 0) > 0)
-      if (!anyone) await dbUpdate(roomPath(code), { ...nextTurnUpdates(room), event: { id: newId(), text: `놉카드 내놔! — 가져올 카드가 없어요 😅` } })
+      if (!anyone) await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text: `놉카드 내놔! — 가져올 카드가 없어요 😅` } })
       return
     }
     case 'home':
     case 'rest': {
-      await dbUpdate(roomPath(code), {
+      await roomUpdate(code, {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: p.kind === 'rest' ? `${me.name} 휴식 ☕ 이번 턴은 쉬어가요` : `${me.name} 출발 칸 🚩` },
       })
@@ -453,25 +479,24 @@ export async function resolvePending(code, room, action, target) {
         const [majority, minority] = pickLiarWords(target)
         const words = {}
         ids.forEach((pid) => (words[pid] = pid === liar ? minority : majority))
-        await dbUpdate(roomPath(code), {
+        await roomUpdate(code, {
           pending: { ...p, stage: 'reveal', category: target, liar, words, majority, minority, revealed: null, votes: null },
           event: { id: newId(), text: `🤥 라이어 게임 시작! 각자 키워드를 확인하세요` },
         })
         return
       }
       if (action === 'vote-start') {
-        await dbUpdate(roomPath(code), { 'pending/stage': 'vote', event: { id: newId(), text: `🗳️ 투표 시간! 라이어 같은 사람을 고르세요` } })
+        await roomUpdate(code, { 'pending/stage': 'vote', event: { id: newId(), text: `🗳️ 투표 시간! 라이어 같은 사람을 고르세요` } })
         return
       }
       if (action === 'result') {
-        await dbUpdate(roomPath(code), { 'pending/stage': 'result' })
+        await roomUpdate(code, { 'pending/stage': 'result' })
         return
       }
       if (action === 'done' && p.stage === 'result') {
-        const r = liarResult(room, p)
-        await dbUpdate(roomPath(code), {
+        await roomUpdate(code, {
           ...nextTurnUpdates(room),
-          event: { id: newId(), text: r.caught ? `시민 승리! 라이어 ${room.players[p.liar]?.name} 마셔 🍶` : `라이어 승리! ${room.players[p.liar]?.name} 빼고 다 마셔 🍻` },
+          event: { id: newId(), text: `🤥 라이어는 ${room.players[p.liar]?.name} (${p.majority} / ${p.minority})` },
         })
         return
       }
@@ -479,7 +504,7 @@ export async function resolvePending(code, room, action, target) {
     }
     case 'aiPick': {
       const t = room.players[p.target]
-      await dbUpdate(roomPath(code), {
+      await roomUpdate(code, {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: `🤖 AI 지목 → ${t?.name || '?'} 마셔! 🍶` },
       })
@@ -487,14 +512,14 @@ export async function resolvePending(code, room, action, target) {
     }
     case 'normal':
     case 'balance': {
-      await dbUpdate(roomPath(code), {
+      await roomUpdate(code, {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: `${me.name} "${cell.text}" 수행 ✅` },
       })
       return
     }
     default:
-      await dbUpdate(roomPath(code), nextTurnUpdates(room))
+      await roomUpdate(code, nextTurnUpdates(room))
   }
 }
 
@@ -503,7 +528,7 @@ export async function useNopAnytime(code, room) {
   const id = myId()
   const me = room.players?.[id]
   if (!me || (me.nop || 0) <= 0) return
-  await dbUpdate(roomPath(code), {
+  await roomUpdate(code, {
     [`players/${id}/nop`]: me.nop - 1,
     event: { id: newId(), text: `${me.name} 놉카드 사용! 🙅` },
   })
@@ -521,14 +546,14 @@ export async function saveCellText(code, room, pos, text) {
 
 export async function setLayout(code, room, layout) {
   if (room.hostId !== myId() || room.status !== 'lobby') return
-  await dbUpdate(roomPath(code), { layout })
+  await roomUpdate(code, { layout })
 }
 
 // 방장: 자리 비운 사람 등 때문에 막혔을 때 차례 강제 넘기기 (대기 중인 카드도 정리)
 export async function hostSkipTurn(code, room) {
   if (room.hostId !== myId() || room.status !== 'playing') return
   const cur = room.players?.[currentPlayerId(room)]
-  await dbUpdate(roomPath(code), {
+  await roomUpdate(code, {
     ...nextTurnUpdates(room),
     event: { id: newId(), text: `방장이 ${cur?.name || ''} 차례를 넘겼어요 ⏭` },
   })
@@ -536,9 +561,9 @@ export async function hostSkipTurn(code, room) {
 
 export async function restartGame(code, room) {
   if (room.hostId !== myId()) return
-  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null }
+  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null, log: null }
   Object.keys(room.players || {}).forEach((pid) => (updates[`players/${pid}/nop`] = 0))
-  await dbUpdate(roomPath(code), updates)
+  await roomUpdate(code, updates)
 }
 
 // ---------- 라이어 게임: 모든 참가자가 쓰는 동작 ----------
@@ -551,10 +576,10 @@ export async function liarReveal(code, room) {
     // 데모: 모든 참가자를 확인 처리
     const upd = {}
     Object.keys(p.words || {}).forEach((pid) => (upd[`pending/revealed/${pid}`] = true))
-    return dbUpdate(roomPath(code), upd)
+    return roomUpdate(code, upd)
   }
   if (!p.words?.[id]) return
-  await dbUpdate(roomPath(code), { [`pending/revealed/${id}`]: true })
+  await roomUpdate(code, { [`pending/revealed/${id}`]: true })
 }
 // 투표 (본인 표만)
 export async function liarVote(code, room, target) {
@@ -562,7 +587,7 @@ export async function liarVote(code, room, target) {
   if (!p || p.kind !== 'liar' || p.stage !== 'vote' || !target) return
   const id = DEMO ? Object.keys(p.words || {}).find((pid) => !p.votes?.[pid]) : myId()
   if (!id || !p.words?.[id]) return
-  await dbUpdate(roomPath(code), { [`pending/votes/${id}`]: target })
+  await roomUpdate(code, { [`pending/votes/${id}`]: target })
 }
 // 결과 계산: 최다 득표(단독)가 라이어면 시민 승리
 export function liarResult(room, p) {

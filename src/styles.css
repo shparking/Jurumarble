@@ -749,11 +749,31 @@ input {
 .log {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 160px;
+  gap: 8px;
+  max-height: 50vh;
   overflow: auto;
-  font-size: 13px;
-  color: var(--text-2);
+  font-size: 14px;
+  color: var(--text);
+  margin-top: 10px;
+  padding-right: 4px;
+}
+.log .line {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  line-height: 1.35;
+}
+.log-time {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  padding-top: 1px;
 }
 .log .line {
   display: flex;
@@ -1576,4 +1596,48 @@ input {
 .liar-words b {
   color: var(--text);
   margin-left: 4px;
+}
+
+/* 라이어 투표 집계 */
+.tally {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tally-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.tally-row .pname {
+  width: 64px;
+  flex: none;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tally-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.tally-bar i {
+  display: block;
+  height: 100%;
+  background: var(--orange);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.tally-row b {
+  width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tally-row.liar .pname {
+  color: var(--orange);
 }

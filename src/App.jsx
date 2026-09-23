@@ -32,6 +32,8 @@ import {
   liarReveal,
   liarVote,
   liarResult,
+  roomLog,
+  trimLog,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -88,6 +90,13 @@ function Icon({ name }) {
       return (
         <svg {...common}>
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )
+    case 'log':
+      return (
+        <svg {...common}>
+          <path d="M8 6h13M8 12h13M8 18h13" />
+          <path d="M3 6h.01M3 12h.01M3 18h.01" />
         </svg>
       )
     case 'exit':
@@ -273,14 +282,14 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
         )}
         {p.stage === 'result' && res && (
           <>
-            <h2>{res.caught ? '🎉 시민 승리!' : '🤥 라이어 승리!'}</h2>
+            <h2>결과 공개</h2>
             <div className="liar-reveal">
               <div className="liar-row">
                 <span className="avatar" style={{ background: room.players[p.liar]?.color }}>
                   {room.players[p.liar]?.name?.slice(0, 1)}
                 </span>
                 <div>
-                  <div className="muted">라이어</div>
+                  <div className="muted">다른 키워드를 받은 사람</div>
                   <b>{room.players[p.liar]?.name}</b>
                 </div>
               </div>
@@ -289,12 +298,25 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
                   다수 키워드 <b>{p.majority}</b>
                 </span>
                 <span>
-                  라이어 키워드 <b>{p.minority}</b>
+                  다른 키워드 <b>{p.minority}</b>
                 </span>
               </div>
-              <div className="muted">
-                {res.tie ? '동점이라 라이어를 못 찾았어요' : res.top ? `최다 득표: ${room.players[res.top]?.name}` : '투표 없음'} ·{' '}
-                {res.caught ? `라이어 ${room.players[p.liar]?.name} 마셔! 🍶` : `${room.players[p.liar]?.name} 빼고 다 마셔! 🍻`}
+              <div className="tally">
+                {ids
+                  .map((pid) => ({ pid, n: res.tally[pid] || 0 }))
+                  .sort((a, b) => b.n - a.n)
+                  .map(({ pid, n }) => (
+                    <div key={pid} className={`tally-row ${pid === p.liar ? 'liar' : ''}`}>
+                      <span className="avatar sm" style={{ background: room.players[pid]?.color }}>
+                        {room.players[pid]?.name?.slice(0, 1)}
+                      </span>
+                      <span className="pname">{room.players[pid]?.name}</span>
+                      <span className="tally-bar">
+                        <i style={{ width: `${ids.length ? (n / ids.length) * 100 : 0}%` }} />
+                      </span>
+                      <b>{n}표</b>
+                    </div>
+                  ))}
               </div>
             </div>
             <div className="actions">
@@ -457,6 +479,7 @@ export default function App() {
   const [activeKey, setActiveKey] = useState(null)
   const [toast, setToast] = useState(null)
   const [peek, setPeek] = useState(null)
+  const [showLog, setShowLog] = useState(false)
   const [editing, setEditing] = useState(null) // { pos, cell, text }
   const [rolling, setRolling] = useState(false)
   const [diceShow, setDiceShow] = useState(1)
@@ -597,6 +620,12 @@ export default function App() {
     return () => clearInterval(t)
   }, [room, me, code])
 
+  // 방장 기기: 로그가 길어지면 오래된 항목 정리
+  useEffect(() => {
+    if (room && room.hostId === me) trimLog(code, room)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Object.keys(room?.log || {}).length])
+
   // 방장 기기가 끝난 옵션 타이머를 정리 (1초마다 확인)
   useEffect(() => {
     if (!room || room.hostId !== me || !room.options) return
@@ -705,6 +734,11 @@ export default function App() {
           {room && <span className="code-chip">{code}</span>}
         </div>
         <div className="row">
+          {room && (
+            <button className="icon-btn" onClick={() => setShowLog(true)} aria-label="게임 로그" title="게임 로그">
+              <Icon name="log" />
+            </button>
+          )}
           {room && (
             <button className="icon-btn" onClick={onLeave} aria-label="나가기" title="나가기">
               <Icon name="exit" />
@@ -1031,6 +1065,30 @@ export default function App() {
                 <div className="waiting">{room.players[pending.playerId]?.name}의 선택을 기다리는 중…</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ---------- 게임 로그 ---------- */}
+      {showLog && room && (
+        <div className="modal-backdrop" onClick={() => setShowLog(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kicker">게임 로그</div>
+            <h2>지금까지 일어난 일</h2>
+            <div className="log">
+              {roomLog(room).length === 0 && <div className="muted">아직 기록이 없어요.</div>}
+              {roomLog(room).map((e) => (
+                <div className="line" key={e.id}>
+                  <span className="log-time">{new Date(e.t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span>{e.text}</span>
+                </div>
+              ))}
+            </div>
+            <div className="actions">
+              <button className="btn btn-ghost" onClick={() => setShowLog(false)}>
+                닫기
+              </button>
+            </div>
           </div>
         </div>
       )}
