@@ -813,9 +813,9 @@ export async function resolvePending(code, room, action, target) {
 }
 
 // 놉카드 언제든 사용 (본인 것만)
-// 놉카드 수동 사용: 순서 목록에서 배지를 눌러 (누구나) 그 사람의 카드를 1장 사용 → 전원 알림
+// 놉카드 수동 사용: 순서 목록에서 내 배지를 눌러 내 카드를 1장 사용 → 전원 알림 (본인만)
 export async function useNopAnytime(code, room, targetId) {
-  const id = targetId || myId()
+  const id = DEMO ? targetId || myId() : myId()
   const t = room.players?.[id]
   if (!t || (t.nop || 0) <= 0) return
   await roomUpdate(code, {

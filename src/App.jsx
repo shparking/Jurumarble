@@ -1737,9 +1737,9 @@ export default function App() {
                     <span className="pname">{p.name}</span>
                     <button
                       className={`nop-badge ${(p.nop || 0) === 0 ? 'empty' : ''}`}
-                      onClick={() => (p.nop || 0) > 0 && setNopConfirm(pid)}
-                      disabled={(p.nop || 0) === 0}
-                      title="놉카드 사용"
+                      onClick={() => mine && (p.nop || 0) > 0 && setNopConfirm(pid)}
+                      disabled={!mine || (p.nop || 0) === 0}
+                      title={mine ? '내 놉카드 사용' : '놉카드 보유 수'}
                     >
                       <NopIcon /> {p.nop || 0}
                     </button>
@@ -1923,14 +1923,16 @@ export default function App() {
       )}
 
       {/* ---------- 놉카드 사용 확인 ---------- */}
-      {nopConfirm && room?.players?.[nopConfirm] && (
+      {nopConfirm && room?.players?.[nopConfirm] && (DEMO || nopConfirm === me) && (
         <div className="modal-backdrop" onClick={() => setNopConfirm(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="kicker">🎫 놉카드</div>
             <h2>
-              <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b>님의 놉카드를 사용하시겠습니까?
+              내 놉카드를 사용하시겠습니까?
             </h2>
-            <div className="muted">보유 {room.players[nopConfirm].nop || 0}장 → {Math.max(0, (room.players[nopConfirm].nop || 0) - 1)}장. 사용하면 모두에게 알림이 떠요.</div>
+            <div className="muted">
+              <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b> · 보유 {room.players[nopConfirm].nop || 0}장 → {Math.max(0, (room.players[nopConfirm].nop || 0) - 1)}장. 사용하면 모두에게 알림이 떠요.
+            </div>
             <div className="actions">
               <button className="btn btn-ghost" onClick={() => setNopConfirm(null)}>
                 아니요
