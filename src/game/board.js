@@ -14,7 +14,7 @@ export const DEFAULT_CELLS = [
   { id: 0, emoji: '🚩', text: '출발', type: 'home', locked: true },
   { id: 1, emoji: '📝', text: '훈민정음 게임' },
   { id: 2, emoji: '👀', text: '눈치게임' },
-  { id: 3, emoji: '🤖', text: 'AI 지목 마셔!' },
+  { id: 3, emoji: '🤖', text: 'AI 지목 마셔!', type: 'aiPick' },
   { id: 4, emoji: '🍻', text: '다같이 마셔!' },
   { id: 5, emoji: '⏩', text: '앞으로 2칸', type: 'move', delta: 2 },
   { id: 6, emoji: '☕', text: '휴식', type: 'rest' },
@@ -39,9 +39,9 @@ export const DEFAULT_CELLS = [
   { id: 25, emoji: '✈️', text: '세계여행', type: 'travel', locked: true },
   { id: 26, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 27, emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
-  { id: 28, emoji: '🍶', text: '박상혁 빼고 다 마셔!' },
+  { id: 28, emoji: '🍶', text: '박상혁빼고\n다 마셔!' },
   { id: 29, emoji: '⚙️', text: '투터치 (Option)', type: 'option', minutes: 10 },
-  { id: 30, emoji: '🗳️', text: '다수결 지목 너 마셔!' },
+  { id: 30, emoji: '🗳️', text: '다수결 지목\n너 마셔!' },
   { id: 31, emoji: '⚖️', text: '밸런스 게임', type: 'balance' },
 ]
 

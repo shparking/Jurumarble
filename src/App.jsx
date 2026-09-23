@@ -26,6 +26,9 @@ import {
   hostSkipTurn,
   purgeRooms,
   removeRoom,
+  lobbyOrder,
+  moveOrder,
+  shuffleOrder,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -45,6 +48,7 @@ const KIND_LABEL = {
   option: '옵션 (10분)',
   release: '옵션 해제',
   steal: '놉카드 뺏기',
+  aiPick: 'AI 지목',
 }
 
 function useTheme() {
@@ -91,6 +95,72 @@ function Icon({ name }) {
     default:
       return null
   }
+}
+
+// AI 지목: 3, 2, 1 카운트다운 → 축하 화면 (모든 폰에 동시에 표시)
+function AiPickOverlay({ room, pending, me, iAct, onDone, onTargetNop }) {
+  const [step, setStep] = useState(3) // 3,2,1 → 0 = 공개
+  useEffect(() => {
+    setStep(3)
+    const t1 = setTimeout(() => setStep(2), 1000)
+    const t2 = setTimeout(() => setStep(1), 2000)
+    const t3 = setTimeout(() => setStep(0), 3000)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+      clearTimeout(t3)
+    }
+  }, [pending.target, pending.startedAt])
+  useEffect(() => {
+    if (step === 0) {
+      try {
+        navigator.vibrate?.([80, 40, 80, 40, 200])
+      } catch {}
+    }
+  }, [step])
+  const target = room.players[pending.target]
+  const isTarget = DEMO || pending.target === me
+  const pieces = Array.from({ length: 28 })
+  return (
+    <div className="ai-overlay">
+      {step > 0 ? (
+        <div className="ai-count" key={step}>
+          <div className="ai-robot">🤖</div>
+          <div className="ai-num">{step}</div>
+          <div className="ai-sub">AI가 한 명을 고르고 있어요…</div>
+        </div>
+      ) : (
+        <div className="ai-reveal">
+          <div className="confetti" aria-hidden>
+            {pieces.map((_, i) => (
+              <i key={i} style={{ '--i': i, left: `${(i * 37) % 100}%`, animationDelay: `${(i % 7) * 0.12}s`, background: ['#ea002c', '#f47725', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff'][i % 6] }} />
+            ))}
+          </div>
+          <div className="ai-congrats">🎉 Congratulations! 🎉</div>
+          <div className="ai-avatar" style={{ background: target?.color }}>
+            {target?.name?.slice(0, 1)}
+          </div>
+          <div className="ai-name">
+            <b>{target?.name}</b> 마셔! 🍶
+          </div>
+          <div className="ai-actions">
+            {isTarget && (target?.nop || 0) > 0 && (
+              <button className="btn btn-ghost" onClick={onTargetNop}>
+                <NopIcon /> 놉카드로 거부
+              </button>
+            )}
+            {iAct ? (
+              <button className="btn btn-primary" onClick={onDone}>
+                확인
+              </button>
+            ) : (
+              <div className="waiting">{room.players[pending.playerId]?.name}이(가) 확인하면 다음 차례로 넘어가요</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function BalanceTopic({ topic }) {
@@ -339,7 +409,7 @@ export default function App() {
     const ev = room?.event
     if (!ev || ev.id === lastEventId.current) return
     lastEventId.current = ev.id
-    setToast(ev.text)
+    setToast(String(ev.text).replace(/\n/g, " "))
     const t = setTimeout(() => setToast(null), 2200)
     return () => clearTimeout(t)
   }, [room?.event?.id])
@@ -551,23 +621,48 @@ export default function App() {
                 초대 링크
               </button>
             </div>
-            <div className="muted">친구들이 이 코드로 들어오면 아래에 나타나요. 시작하면 순서는 랜덤으로 정해집니다.</div>
+            <div className="muted">친구들이 이 코드로 들어오면 아래에 나타나요. 순서는 방장이 정할 수 있고, 안 정하면 랜덤이에요.</div>
           </div>
 
           <div className="card card-pad stack">
-            <div className="label">참가자 {playerCount}명</div>
-            <div className="player-list">
-              {Object.entries(room.players || {}).filter(([, p]) => p?.name).map(([pid, p]) => (
-                <div className="player-row" key={pid}>
-                  <span className="avatar" style={{ background: p.color }}>
-                    {p.name.slice(0, 1)}
-                  </span>
-                  <span className="player-name">{p.name}</span>
-                  {pid === me && <span className="me-tag">나</span>}
-                  {pid === room.hostId && <span className="tag">방장</span>}
-                </div>
-              ))}
+            <div className="row">
+              <div className="label" style={{ marginBottom: 0 }}>
+                참가자 {playerCount}명 · {room.orderSet ? '순서: 방장 지정' : '순서: 랜덤'}
+              </div>
+              <div className="spacer" />
+              {isHost && playerCount >= 2 && (
+                <button className="btn btn-ghost btn-sm" onClick={() => shuffleOrder(code, room)}>
+                  🔀 섞기
+                </button>
+              )}
             </div>
+            <div className="player-list">
+              {lobbyOrder(room).map((pid, i, arr) => {
+                const p = room.players[pid]
+                return (
+                  <div className="player-row" key={pid}>
+                    <span className="order">{i + 1}</span>
+                    <span className="avatar" style={{ background: p.color }}>
+                      {p.name.slice(0, 1)}
+                    </span>
+                    <span className="player-name">{p.name}</span>
+                    {pid === me && <span className="me-tag">나</span>}
+                    {pid === room.hostId && <span className="tag">방장</span>}
+                    {isHost && (
+                      <span className="order-btns">
+                        <button aria-label="위로" disabled={i === 0} onClick={() => moveOrder(code, room, pid, -1)}>
+                          ▲
+                        </button>
+                        <button aria-label="아래로" disabled={i === arr.length - 1} onClick={() => moveOrder(code, room, pid, 1)}>
+                          ▼
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {isHost && <div className="muted">▲▼ 로 순서를 바꿀 수 있어요. 1번부터 시작합니다.</div>}
           </div>
 
           {isHost ? (
@@ -683,8 +778,20 @@ export default function App() {
         </>
       )}
 
+      {/* ---------- AI 지목: 카운트다운 + 축하 화면 ---------- */}
+      {room && showPending && pending.kind === 'aiPick' && (
+        <AiPickOverlay
+          room={room}
+          pending={pending}
+          me={me}
+          iAct={iAct}
+          onDone={() => resolvePending(code, room, 'done')}
+          onTargetNop={() => resolvePending(code, room, 'target-nop')}
+        />
+      )}
+
       {/* ---------- 도착 칸 모달 ---------- */}
-      {room && showPending && !picking && !autoKind && pendingCell && (
+      {room && showPending && !picking && !autoKind && pending.kind !== 'aiPick' && pendingCell && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>
@@ -785,21 +892,20 @@ export default function App() {
             <div className="kicker">{editing.pos.track === 'bridge' ? '다리 칸 편집' : `${editing.pos.idx}번 칸 편집`}</div>
             <div className="edit-preview">
               <span className="edit-emo">{autoEmoji(editing.text, editing.cell.emoji)}</span>
-              <span className="muted">내용에 맞는 이모지가 자동으로 붙어요</span>
+              <span className="muted">내용에 맞는 이모지가 자동으로 붙어요 (단어에 따라 바뀜)</span>
             </div>
-            <input
-              className="field"
+            <textarea
+              className="field field-area"
               value={editing.text}
-              maxLength={24}
+              maxLength={30}
+              rows={2}
               autoFocus
-              onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  saveCellText(code, room, editing.pos, editing.text)
-                  setEditing(null)
-                }
-              }}
+              placeholder="칸에 보일 글자 (줄바꿈은 Enter)"
+              onChange={(e) => setEditing({ ...editing, text: e.target.value.replace(/\n{2,}/g, '\n') })}
             />
+            <div className="muted" style={{ marginTop: 6 }}>
+              Enter 로 줄을 나눌 수 있어요 (칸에서 그대로 두 줄로 보여요).
+            </div>
             {editing.cell.type && editing.cell.type !== 'normal' && (
               <div className="muted" style={{ marginTop: 8 }}>
                 이 칸의 효과({KIND_LABEL[editing.cell.type] || editing.cell.type})는 그대로 유지되고 글자만 바뀌어요.

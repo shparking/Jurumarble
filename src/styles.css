@@ -357,6 +357,7 @@ input {
 .cell-inner .txt {
   display: block;
   width: 100%;
+  white-space: pre-line; /* 텍스트의 줄바꿈(\n)을 그대로 표시 */
 }
 .cell-inner .band {
   position: absolute;
@@ -1245,4 +1246,185 @@ input {
   display: grid;
   place-items: center;
   font-size: 24px;
+}
+
+/* ---------- 대기실 순서 지정 ---------- */
+.player-row .order {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--orange);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.order-btns {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.order-btns button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 900;
+}
+.order-btns button:disabled {
+  opacity: 0.3;
+}
+.order-btns button:not(:disabled):active {
+  background: var(--orange-soft);
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+/* 편집 모달: 여러 줄 입력 */
+.field-area {
+  height: auto;
+  min-height: 72px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  resize: none;
+  line-height: 1.4;
+  font-family: inherit;
+}
+.modal h2 {
+  white-space: pre-line;
+}
+
+/* ---------- AI 지목 오버레이 ---------- */
+.ai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(120% 120% at 50% 0%, rgba(244, 119, 37, 0.35), rgba(0, 0, 0, 0.82) 60%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: #fff;
+  text-align: center;
+  animation: fade 0.2s ease;
+  overflow: hidden;
+}
+.ai-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  animation: pop 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ai-robot {
+  font-size: 64px;
+  line-height: 1;
+  animation: robot 1s ease-in-out infinite;
+}
+.ai-num {
+  font-size: 120px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--orange);
+  text-shadow: 0 8px 30px rgba(244, 119, 37, 0.45);
+}
+.ai-sub {
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+@keyframes pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+@keyframes robot {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(8deg) translateY(-4px); }
+}
+.ai-reveal {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: pop 0.55s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ai-congrats {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: #ffd166;
+  text-shadow: 0 4px 20px rgba(255, 209, 102, 0.4);
+}
+.ai-avatar {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 40px;
+  font-weight: 900;
+  color: #fff;
+  border: 4px solid #fff;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 10px rgba(255, 255, 255, 0.12);
+  animation: robot 1.6s ease-in-out infinite;
+}
+.ai-name {
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  word-break: keep-all;
+}
+.ai-name b {
+  color: var(--orange);
+}
+.ai-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 10px;
+  width: 100%;
+}
+.ai-actions .btn {
+  min-width: 140px;
+}
+.ai-actions .waiting {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 14px;
+}
+.confetti {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -40vh;
+  height: 120vh;
+  pointer-events: none;
+}
+.confetti i {
+  position: absolute;
+  top: 0;
+  width: 10px;
+  height: 16px;
+  border-radius: 3px;
+  opacity: 0;
+  animation: confetti-fall 2.6s ease-in infinite;
+  transform: rotate(calc(var(--i) * 25deg));
+}
+@keyframes confetti-fall {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10% { opacity: 1; }
+  100% { transform: translateY(120vh) rotate(720deg); opacity: 0.9; }
 }

@@ -166,8 +166,32 @@ export function currentPlayerId(room) {
 }
 
 // ---------- 게임 진행 (행동 주체 클라이언트가 호출) ----------
+// 대기실에서 방장이 정한 순서(room.order)가 있으면 그대로, 없으면 랜덤. 새로 들어온 사람은 뒤에 붙임
+export function lobbyOrder(room) {
+  const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
+  const set = (room.order || []).filter((id) => ids.includes(id))
+  return [...set, ...ids.filter((id) => !set.includes(id))]
+}
+
+// 방장: 대기실 순서 변경 (dir = -1 위로 / +1 아래로)
+export async function moveOrder(code, room, playerId, dir) {
+  if (room.hostId !== myId() || room.status !== 'lobby') return
+  const order = lobbyOrder(room)
+  const i = order.indexOf(playerId)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= order.length) return
+  ;[order[i], order[j]] = [order[j], order[i]]
+  await dbUpdate(roomPath(code), { order, orderSet: true })
+}
+
+// 방장: 순서 랜덤으로 섞기 (대기실)
+export async function shuffleOrder(code, room) {
+  if (room.hostId !== myId() || room.status !== 'lobby') return
+  await dbUpdate(roomPath(code), { order: shuffle(lobbyOrder(room)), orderSet: true })
+}
+
 export async function startGame(code, room) {
-  const order = shuffle(Object.keys(room.players || {}).filter((id) => room.players[id]?.name))
+  const order = room.orderSet ? lobbyOrder(room) : shuffle(lobbyOrder(room))
   await dbUpdate(roomPath(code), {
     status: 'playing',
     order,
@@ -192,6 +216,12 @@ function pendingFor(room, playerId, pos) {
   const kind = cell.type || 'normal'
   const p = { kind, playerId, pos }
   if (kind === 'balance') p.topic = pickTopic(room)
+  if (kind === 'aiPick') {
+    // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
+    const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
+    p.target = ids[Math.floor(Math.random() * ids.length)] || playerId
+    p.startedAt = Date.now()
+  }
   return p
 }
 
@@ -266,7 +296,9 @@ export async function rerollTopic(code, room) {
 export async function rollDice(code, room) {
   const id = DEMO ? currentPlayerId(room) : myId() // 데모에서는 한 기기로 모두 조작
   if (currentPlayerId(room) !== id || room.pending || room.status !== 'playing') return
-  const value = 1 + Math.floor(Math.random() * 6)
+  // 데모: ?demo=1&dice=3 처럼 주사위 값을 고정 (테스트용)
+  const forced = DEMO ? parseInt(new URLSearchParams(window.location.search).get('dice'), 10) : NaN
+  const value = forced >= 1 && forced <= 6 ? forced : 1 + Math.floor(Math.random() * 6)
   const rules = LAYOUTS[room.layout || 'landscape']
   const path = computePath(room.pos, value, rules)
   const finalPos = path[path.length - 1]
@@ -293,8 +325,24 @@ function nextTurnUpdates(room) {
 // 도착 칸 모달의 버튼 처리. action: 'done' | 'nop-use' | 'pick'(travel, target)
 export async function resolvePending(code, room, action, target) {
   const p = room.pending
-  const id = DEMO ? p?.playerId : myId()
-  if (!p || p.playerId !== id) return
+  if (!p) return
+
+  // AI 지목: 지목된 사람이 놉카드로 거부할 수 있음 (행동 주체가 아니어도)
+  if (p.kind === 'aiPick' && action === 'target-nop') {
+    const tid = DEMO ? p.target : myId()
+    if (tid !== p.target) return
+    const t = room.players[tid]
+    if (!t || (t.nop || 0) <= 0) return
+    await dbUpdate(roomPath(code), {
+      ...nextTurnUpdates(room),
+      [`players/${tid}/nop`]: t.nop - 1,
+      event: { id: newId(), text: `${t.name} 놉카드 사용! AI 지목 거부 🙅` },
+    })
+    return
+  }
+
+  const id = DEMO ? p.playerId : myId()
+  if (p.playerId !== id) return
   const me = room.players[id]
   const cells = roomCells(room)
   const bridge = roomBridge(room)
@@ -393,6 +441,14 @@ export async function resolvePending(code, room, action, target) {
       })
       return
     }
+    case 'aiPick': {
+      const t = room.players[p.target]
+      await dbUpdate(roomPath(code), {
+        ...nextTurnUpdates(room),
+        event: { id: newId(), text: `🤖 AI 지목 → ${t?.name || '?'} 마셔! 🍶` },
+      })
+      return
+    }
     case 'normal':
     case 'balance': {
       await dbUpdate(roomPath(code), {
@@ -444,7 +500,7 @@ export async function hostSkipTurn(code, room) {
 
 export async function restartGame(code, room) {
   if (room.hostId !== myId()) return
-  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, options: null }
+  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null }
   Object.keys(room.players || {}).forEach((pid) => (updates[`players/${pid}/nop`] = 0))
   await dbUpdate(roomPath(code), updates)
 }
