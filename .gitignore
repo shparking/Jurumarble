@@ -1,0 +1,6 @@
+node_modules
+dist
+single
+test-build
+.env
+.DS_Store
