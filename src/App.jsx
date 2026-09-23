@@ -38,6 +38,8 @@ import {
   castVote,
   voteWinners,
   voteTally,
+  balanceVote,
+  balanceResult,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -158,9 +160,16 @@ function CountOverlay({ step, emoji, sub }) {
 }
 
 // 축하 화면: 지목된 사람(들) 공개 + 컨페티
-function CongratsOverlay({ room, targets, actorId, iAct, canNop, onDone, onTargetNop, title = '🎉 Congratulations! 🎉' }) {
+function CongratsOverlay({ room, targets, actorId, iAct, canNop, onDone, onTargetNop, title = '🎉 Congratulations! 🎉', note, refused = {} }) {
   const pieces = Array.from({ length: 28 })
   const names = targets.map((t) => room.players[t]?.name).filter(Boolean)
+  const nameEls = targets.map((t, i) => (
+    <span key={t} className={refused[t] ? 'refused' : ''}>
+      {room.players[t]?.name}
+      {refused[t] ? ' (거부)' : ''}
+      {i < targets.length - 1 ? ', ' : ''}
+    </span>
+  ))
   return (
     <div className="ai-overlay">
       <div className="ai-reveal">
@@ -177,8 +186,9 @@ function CongratsOverlay({ room, targets, actorId, iAct, canNop, onDone, onTarge
             </div>
           ))}
         </div>
+        {note && <div className="ai-note">{note}</div>}
         <div className="ai-name">
-          <b>{names.join(', ')}</b> 마셔! 🍶
+          <b>{names.length ? nameEls : '—'}</b> 마셔! 🍶
         </div>
         <div className="ai-actions">
           {canNop && (
@@ -303,6 +313,178 @@ function HunminPanel({ room, pending: p, iAct, code, keyId }) {
             <div className="waiting">{actor?.name}이(가) 진행 중…</div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// 밸런스 게임: 주제 A vs B → 각자 양자택일 → 결과 (소수 마시기 / 동점 재투표 / 만장일치 룰렛)
+function BalancePanel({ room, pending: p, me, iAct, code }) {
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const [ta, tb] = (BALANCE_TOPICS[p.topic] || ' vs ').split(' vs ')
+  const votes = p.votes || {}
+  const votedCount = ids.filter((pid) => votes[pid]).length
+  const myVote = DEMO ? null : votes[me]
+  const r = balanceResult(p)
+  const step = useCountdown(p.stage === 'vote' ? 'vote' : `${p.stage}-${p.revealedAt}`)
+  const actor = room.players[p.playerId]
+  const title = p.title || '밸런스 게임'
+
+  if (p.stage === 'roulette') return <RouletteOverlay room={room} pending={p} iAct={iAct} code={code} ta={ta} tb={tb} r={r} />
+  if (p.stage === 'result') {
+    if (step > 0) return <CountOverlay step={step} emoji="⚖️" sub="투표 결과를 집계하고 있어요…" />
+    const canNop = (DEMO || r.losers.includes(me)) && !p.refused?.[DEMO ? r.losers[0] : me] && (room.players[DEMO ? r.losers[0] : me]?.nop || 0) > 0
+    return (
+      <CongratsOverlay
+        room={room}
+        targets={r.losers}
+        actorId={p.playerId}
+        iAct={iAct}
+        canNop={canNop}
+        refused={p.refused || {}}
+        note={`${ta} ${r.a} : ${r.b} ${tb} · 소수 의견`}
+        onDone={() => resolvePending(code, room, 'done')}
+        onTargetNop={() => resolvePending(code, room, 'target-nop')}
+      />
+    )
+  }
+  if (p.stage === 'tie' && step > 0) return <CountOverlay step={step} emoji="⚖️" sub="투표 결과를 집계하고 있어요…" />
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">⚖️ {title} · {p.round || 1}라운드</div>
+        {p.stage === 'tie' ? (
+          <>
+            <h2>🤝 동점!</h2>
+            <div className="bal-topic result">
+              <div className="opt">
+                {ta}
+                <span className="cnt">{r.a}표</span>
+              </div>
+              <div className="vs">{r.a}:{r.b}</div>
+              <div className="opt">
+                {tb}
+                <span className="cnt">{r.b}표</span>
+              </div>
+            </div>
+            <div className="muted">다수결이 나올 때까지 다른 주제로 다시 투표해요.</div>
+            <div className="actions">
+              {iAct ? (
+                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'reroll')}>
+                  🔄 다른 주제로 다시 투표
+                </button>
+              ) : (
+                <div className="waiting">{actor?.name}이(가) 다음 주제를 열어요</div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>둘 중 하나만!</h2>
+            <div className="muted">
+              각자 고르세요. 소수 의견이 마셔요. 동점이면 다른 주제로, 만장일치면 룰렛! ({votedCount}/{ids.length} 투표)
+            </div>
+            <div className="bal-topic pick">
+              <button className={`opt ${myVote === 'A' ? 'on' : ''}`} onClick={() => balanceVote(code, room, 'A')}>
+                {ta}
+                {myVote === 'A' && <span className="me-tag">내 선택</span>}
+              </button>
+              <div className="vs">VS</div>
+              <button className={`opt ${myVote === 'B' ? 'on' : ''}`} onClick={() => balanceVote(code, room, 'B')}>
+                {tb}
+                {myVote === 'B' && <span className="me-tag">내 선택</span>}
+              </button>
+            </div>
+            <div className="actions">
+              {iAct ? (
+                <>
+                  <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'reroll')} title="다른 주제">
+                    🔄 다른 주제
+                  </button>
+                  {(actor?.nop || 0) > 0 && (
+                    <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
+                      <NopIcon /> 놉카드 사용
+                    </button>
+                  )}
+                  <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount < Math.min(2, ids.length)}>
+                    결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
+                  </button>
+                </>
+              ) : (
+                <div className="waiting">모두 고르면 {actor?.name}이(가) 결과를 공개해요</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// 만장일치 룰렛: 50/50 다같이 마셔 / 아무도 안 마셔
+function RouletteOverlay({ room, pending: p, iAct, code, ta, tb, r }) {
+  const [spun, setSpun] = useState(false)
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    setSpun(false)
+    setDone(false)
+    const t1 = setTimeout(() => setSpun(true), 100)
+    const t2 = setTimeout(() => setDone(true), 3400)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [p.revealedAt])
+  useEffect(() => {
+    if (done) {
+      try {
+        navigator.vibrate?.([80, 40, 80, 40, 200])
+      } catch {}
+    }
+  }, [done])
+  const drink = p.roulette === 'drink'
+  // 바늘은 위(0deg). 'drink' 반쪽은 0~180deg(오른쪽), 'safe' 는 180~360deg(왼쪽)
+  const finalDeg = 360 * 5 + (drink ? 270 : 90) // 5바퀴 후 해당 반쪽 중앙이 바늘 아래로
+  const pieces = Array.from({ length: 28 })
+  return (
+    <div className="ai-overlay">
+      <div className="ai-reveal">
+        {done && (
+          <div className="confetti" aria-hidden>
+            {pieces.map((_, i) => (
+              <i key={i} style={{ '--i': i, left: `${(i * 37) % 100}%`, animationDelay: `${(i % 7) * 0.12}s`, background: ['#ea002c', '#f47725', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff'][i % 6] }} />
+            ))}
+          </div>
+        )}
+        <div className="ai-congrats">🎯 만장일치! 룰렛</div>
+        <div className="ai-note">
+          {ta} {r.a} : {r.b} {tb}
+        </div>
+        <div className="roulette">
+          <div className="needle" />
+          <div className="wheel" style={{ transform: spun ? `rotate(${finalDeg}deg)` : 'rotate(0deg)' }}>
+            <span className="half drink">🍻</span>
+            <span className="half safe">😇</span>
+          </div>
+        </div>
+        <div className="roulette-legend">
+          <span>
+            <i className="sw drink" /> 다같이 마셔
+          </span>
+          <span>
+            <i className="sw safe" /> 아무도 안 마셔
+          </span>
+        </div>
+        <div className="ai-name">{done ? drink ? <b>다같이 마셔! 🍻</b> : <b>아무도 안 마셔! 😇</b> : <span className="muted-light">돌아가는 중…</span>}</div>
+        <div className="ai-actions">
+          {done && iAct ? (
+            <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+              확인
+            </button>
+          ) : done ? (
+            <div className="waiting">{room.players[p.playerId]?.name}이(가) 확인하면 다음 차례로</div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -1153,6 +1335,9 @@ export default function App() {
       {/* ---------- 다수결 지목 ---------- */}
       {room && showPending && pending.kind === 'vote' && <VotePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
 
+      {/* ---------- 밸런스 게임 ---------- */}
+      {room && showPending && pending.kind === 'balance' && <BalancePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
+
       {/* ---------- 의리주 순서 ---------- */}
       {room && showPending && pending.kind === 'shuffle' && <ShufflePanel room={room} pending={pending} iAct={iAct} code={code} />}
 
@@ -1162,7 +1347,7 @@ export default function App() {
       )}
 
       {/* ---------- 도착 칸 모달 ---------- */}
-      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin', 'shuffle'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
+      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin', 'shuffle', 'balance'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>

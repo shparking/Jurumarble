@@ -268,7 +268,11 @@ function pendingFor(room, playerId, pos) {
 function makePending(room, playerId, pos, kind, title) {
   const p = { kind, playerId, pos }
   if (title) p.title = title
-  if (kind === 'balance') p.topic = pickTopic(room)
+  if (kind === 'balance') {
+    p.topic = pickTopic(room)
+    p.stage = 'vote' // vote → (tie → vote) / result / roulette
+    p.round = 1
+  }
   if (kind === 'liar') p.stage = 'category' // category → reveal → vote → result
   if (kind === 'hunmin') p.chosung = pickChosung()
   if (kind === 'vote') p.stage = 'vote' // vote → result
@@ -352,7 +356,7 @@ export async function rerollTopic(code, room) {
   const p = room.pending
   const id = DEMO ? p?.playerId : myId()
   if (!p || p.kind !== 'balance' || p.playerId !== id) return
-  const next = { ...p, topic: pickTopic(room) }
+  const next = { ...p, topic: pickTopic(room), stage: 'vote', votes: null, round: (p.round || 1) + 1, revealedAt: null, roulette: null, refused: null }
   await roomUpdate(code, withTopicUpdates(room, next, { pending: next }))
 }
 
@@ -393,6 +397,21 @@ export async function resolvePending(code, room, action, target) {
   const p = room.pending
   if (!p) return
 
+  // 밸런스 게임 소수 의견: 각자 놉카드로 본인만 거부 (턴은 행동자가 확인할 때 넘어감)
+  if (action === 'target-nop' && p.kind === 'balance' && p.stage === 'result') {
+    const r = balanceResult(p)
+    const tid = DEMO ? r.losers.find((x) => !p.refused?.[x]) : myId()
+    if (!tid || !r.losers.includes(tid) || p.refused?.[tid]) return
+    const t = room.players[tid]
+    if (!t || (t.nop || 0) <= 0) return
+    await roomUpdate(code, {
+      [`pending/refused/${tid}`]: true,
+      [`players/${tid}/nop`]: t.nop - 1,
+      event: { id: newId(), text: `${t.name} 놉카드 사용! 밸런스 벌주 거부 🙅` },
+    })
+    return
+  }
+
   // AI 지목 / 다수결 지목: 지목된 사람이 놉카드로 거부할 수 있음 (행동 주체가 아니어도)
   if (action === 'target-nop' && (p.kind === 'aiPick' || (p.kind === 'vote' && p.stage === 'result'))) {
     const targets = p.kind === 'aiPick' ? [p.target] : voteWinners(p)
@@ -419,6 +438,7 @@ export async function resolvePending(code, room, action, target) {
   if (action === 'nop-use') {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
     if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
+    if (p.kind === 'balance' && p.stage !== 'vote') return
     if (p.kind === 'vote' || p.kind === 'choose' || p.kind === 'shuffle') return
     await roomUpdate(code, {
       ...nextTurnUpdates(room),
@@ -588,8 +608,32 @@ export async function resolvePending(code, room, action, target) {
       })
       return
     }
-    case 'normal':
     case 'balance': {
+      const [ta, tb] = (BALANCE_TOPICS[p.topic] || ' vs ').split(' vs ')
+      if (action === 'reroll') return rerollTopic(code, room)
+      if (action === 'result' && p.stage === 'vote') {
+        const r = balanceResult(p)
+        if (r.total === 0) return
+        if (r.tie) {
+          await roomUpdate(code, { 'pending/stage': 'tie', 'pending/revealedAt': Date.now() })
+        } else if (r.unanimous) {
+          await roomUpdate(code, { 'pending/stage': 'roulette', 'pending/revealedAt': Date.now(), 'pending/roulette': Math.random() < 0.5 ? 'drink' : 'safe' })
+        } else {
+          await roomUpdate(code, { 'pending/stage': 'result', 'pending/revealedAt': Date.now() })
+        }
+        return
+      }
+      if (action === 'done' && (p.stage === 'result' || p.stage === 'roulette')) {
+        const r = balanceResult(p)
+        const text =
+          p.stage === 'roulette'
+            ? `⚖️ ${ta} ${r.a} : ${r.b} ${tb} 만장일치 → 룰렛 ${p.roulette === 'drink' ? '다같이 마셔! 🍻' : '아무도 안 마셔 😇'}`
+            : `⚖️ ${ta} ${r.a} : ${r.b} ${tb} → 소수 ${r.losers.map((x) => room.players[x]?.name).filter(Boolean).join(', ')} 마셔! 🍶`
+        await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text } })
+      }
+      return
+    }
+    case 'normal': {
       await roomUpdate(code, {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: `${me.name} "${cell.text}" 수행 ✅` },
@@ -698,4 +742,26 @@ export function voteTally(p) {
   const tally = {}
   Object.values(p.votes || {}).forEach((t) => (tally[t] = (tally[t] || 0) + 1))
   return tally
+}
+
+// ---------- 밸런스 게임 투표 ----------
+export async function balanceVote(code, room, choice) {
+  const p = room.pending
+  if (!p || p.kind !== 'balance' || p.stage !== 'vote' || !['A', 'B'].includes(choice)) return
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const id = DEMO ? ids.find((pid) => !p.votes?.[pid]) || ids[0] : myId()
+  if (!id || !ids.includes(id)) return
+  await roomUpdate(code, { [`pending/votes/${id}`]: choice })
+}
+// 결과: a/b 표 수, 동점, 만장일치, 소수 의견(마시는 사람들)
+export function balanceResult(p) {
+  const votes = p.votes || {}
+  const A = Object.keys(votes).filter((k) => votes[k] === 'A')
+  const B = Object.keys(votes).filter((k) => votes[k] === 'B')
+  const total = A.length + B.length
+  const tie = total > 0 && A.length === B.length
+  const unanimous = total > 0 && (A.length === 0 || B.length === 0)
+  const losers = tie || unanimous ? [] : A.length < B.length ? A : B
+  const loserSide = losers.length ? (A.length < B.length ? 'A' : 'B') : null
+  return { a: A.length, b: B.length, A, B, total, tie, unanimous, losers, loserSide }
 }
