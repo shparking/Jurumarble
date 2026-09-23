@@ -293,10 +293,14 @@ function makePending(room, playerId, pos, kind, title) {
     p.topic = pickBombTopic()
   }
   if (kind === 'reaction') p.stage = 'ready' // ready → armed(goAt) → result
-  if (kind === 'gamble') {
-    // 놉카드 도박: 50% 놉카드 +2 / 50% 전부 소멸(없으면 대신 마시기)
-    p.roulette = Math.random() < 0.5 ? 'win' : 'lose'
-    p.revealedAt = Date.now()
+  if (kind === 'gamble') p.stage = 'ask' // ask → spin(roulette, revealedAt)
+  if (kind === 'option') {
+    const cell = cellAt(roomCells(room), roomBridge(room), pos)
+    if (cell.pair) {
+      // 연대책임: 도착한 사람 외 한 명을 무작위로 짝 지정
+      const others = Object.keys(room.players || {}).filter((id) => id !== playerId && room.players[id]?.name)
+      p.partner = others.length ? others[Math.floor(Math.random() * others.length)] : null
+    }
   }
   if (kind === 'aiPick') {
     // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
@@ -320,27 +324,32 @@ const optionKey = (pos) => (pos.track === 'main' ? `m${pos.idx}` : `b${pos.idx}`
 const optionLabel = (cell) => cell.text.replace(/\s*\(option\)\s*/i, '').trim()
 
 // 옵션 수행 확정 → 모두에게 적용되는 타이머 시작. 이미 진행 중이면 시간 추가(+10분)
-function optionStartUpdates(room, cell, pos, me, id, updates) {
+function optionStartUpdates(room, cell, pos, me, id, updates, partner) {
   const minutes = cell.minutes || 10
   const key = optionKey(pos)
   const cur = room.options?.[key]
   const nowMs = Date.now()
+  // 연대책임: 짝(도착한 사람 ❤️ 무작위 1명). 재방문이면 새 짝으로 교체
+  const pair = cell.pair && partner ? [id, partner] : null
+  const pairText = pair ? `${room.players[pair[0]]?.name} ❤️ ${room.players[pair[1]]?.name}` : ''
   if (cur && cur.endsAt > nowMs) {
     updates[`options/${key}`] = {
       ...cur,
       endsAt: cur.endsAt + minutes * 60 * 1000,
       minutes: (cur.minutes || 0) + minutes,
+      ...(pair ? { pair, who: pairText } : {}),
     }
     const leftMin = Math.ceil((cur.endsAt + minutes * 60 * 1000 - nowMs) / 60000)
-    updates.event = { id: newId(), text: `⏱ ${optionLabel(cell)} +${minutes}분 (남은 시간 ${leftMin}분)` }
+    updates.event = { id: newId(), text: `⏱ ${optionLabel(cell)} +${minutes}분 (남은 시간 ${leftMin}분)${pair ? ` — ${pairText}` : ''}` }
   } else {
     updates[`options/${key}`] = {
       text: optionLabel(cell),
       startedAt: nowMs,
       endsAt: nowMs + minutes * 60 * 1000,
       minutes,
+      ...(pair ? { pair, who: pairText } : {}),
     }
-    updates.event = { id: newId(), text: `⏱ ${optionLabel(cell)} ${minutes}분 시작 — 모두 적용!` }
+    updates.event = { id: newId(), text: pair ? `⏱ ${optionLabel(cell)} ${minutes}분 — ${pairText} 함께 벌칙!` : `⏱ ${optionLabel(cell)} ${minutes}분 시작 — 모두 적용!` }
   }
   return updates
 }
@@ -519,7 +528,7 @@ export async function resolvePending(code, room, action, target) {
       return
     }
     case 'option': {
-      await roomUpdate(code, optionStartUpdates(room, cell, p.pos, me, id, { ...nextTurnUpdates(room) }))
+      await roomUpdate(code, optionStartUpdates(room, cell, p.pos, me, id, { ...nextTurnUpdates(room) }, p.partner))
       return
     }
     case 'steal': {
@@ -610,17 +619,28 @@ export async function resolvePending(code, room, action, target) {
       return
     }
     case 'gamble': {
-      if (action === 'done') {
+      // ask: 도박 하기(spin) / 패스(skip). 카드가 있으면 +2 vs 전부 소멸, 없으면 안 마셔 vs 마셔
+      if (action === 'spin' && p.stage === 'ask') {
+        await roomUpdate(code, { 'pending/stage': 'spin', 'pending/roulette': Math.random() < 0.5 ? 'win' : 'lose', 'pending/revealedAt': Date.now(), 'pending/nopAtSpin': me.nop || 0 })
+        return
+      }
+      if (action === 'skip' && p.stage === 'ask') {
+        await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text: `🎰 ${me.name} 도박 패스 😌` } })
+        return
+      }
+      if (action === 'done' && p.stage === 'spin') {
         const nop = me.nop || 0
         const upd = { ...nextTurnUpdates(room) }
-        if (p.roulette === 'win') {
-          upd[`players/${id}/nop`] = nop + 2
-          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 성공! 놉카드 +2 🎫` }
-        } else if (nop > 0) {
-          upd[`players/${id}/nop`] = 0
-          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 실패… 놉카드 ${nop}장 소멸 💀` }
+        if (nop > 0) {
+          if (p.roulette === 'win') {
+            upd[`players/${id}/nop`] = nop + 2
+            upd.event = { id: newId(), text: `🎰 ${me.name} 도박 성공! 놉카드 +2 🎫` }
+          } else {
+            upd[`players/${id}/nop`] = 0
+            upd.event = { id: newId(), text: `🎰 ${me.name} 도박 실패… 놉카드 ${nop}장 소멸 💀` }
+          }
         } else {
-          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 실패… 놉카드가 없어서 대신 마셔! 🍶` }
+          upd.event = { id: newId(), text: p.roulette === 'win' ? `🎰 ${me.name} 도박 성공! 안 마셔도 돼요 😇` : `🎰 ${me.name} 도박 실패… 마셔! 🍶` }
         }
         await roomUpdate(code, upd)
       }

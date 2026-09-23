@@ -1900,3 +1900,27 @@ input {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* 연대책임 짝 공개 */
+.pair-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 14px 0 6px;
+  padding: 16px 12px;
+  border-radius: 18px;
+  background: var(--orange-soft);
+  border: 2px solid var(--orange);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+.pair-card .heart {
+  font-size: 26px;
+  animation: heart 1s ease-in-out infinite;
+}
+@keyframes heart {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}

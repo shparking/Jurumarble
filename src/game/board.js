@@ -49,9 +49,9 @@ export const DEFAULT_CELLS = [
 export const DEFAULT_BRIDGE = [
   { id: 'b0', emoji: '🚗', text: '대리 기사' },
   { id: 'b1', emoji: '🎫', text: '놉카드 +1', type: 'nop' },
-  { id: 'b2', emoji: '⚙️', text: '연대책임', type: 'option', minutes: 10 },
+  { id: 'b2', emoji: '⚙️', text: '연대책임', type: 'option', minutes: 10, pair: true },
   { id: 'b3', emoji: '🔮', text: '텔레파시 게임' },
-  { id: 'b4', emoji: '👉', text: '너! 마셔! (지목)' },
+  { id: 'b4', emoji: '⚙️', text: '아니·근데·진짜\n금지', type: 'option', minutes: 5 },
   { id: 'b5', emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
 ]
 

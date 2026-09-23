@@ -62,7 +62,7 @@ const KIND_LABEL = {
   rest: '휴식',
   home: '출발',
   balance: '밸런스 게임',
-  option: '옵션 (10분)',
+  option: '옵션 타이머',
   release: '옵션 해제',
   steal: '놉카드 뺏기',
   aiPick: 'AI 지목',
@@ -505,27 +505,73 @@ function RouletteOverlay({ room, actorId, iAct, onDone, revealKey, title, note, 
   )
 }
 
-// 놉카드 도박: 룰렛 50% 놉카드 +2 / 전부 소멸(없으면 대신 마시기)
+// 놉카드 도박: 할지 말지 선택 → 룰렛. 카드 있으면 +2 vs 전부 소멸, 없으면 안 마셔 vs 마셔
 function GamblePanel({ room, pending: p, iAct, code }) {
   const actor = room.players[p.playerId]
   const nop = actor?.nop || 0
-  const win = p.roulette === 'win'
+  if (p.stage === 'spin') {
+    const win = p.roulette === 'win'
+    const had = p.nopAtSpin ?? nop
+    const options =
+      had > 0
+        ? [
+            { emoji: '🎫', label: '놉카드 +2', color: '#06d6a0' },
+            { emoji: '💀', label: `놉카드 ${had}장 소멸`, color: '#ea002c' },
+          ]
+        : [
+            { emoji: '😇', label: '안 마셔', color: '#06d6a0' },
+            { emoji: '🍶', label: '마셔', color: '#ea002c' },
+          ]
+    const resultText = had > 0 ? (win ? '놉카드 +2! 🎫🎫' : `놉카드 ${had}장 소멸… 💀`) : win ? '안 마셔도 돼요! 😇' : '마셔! 🍶'
+    return (
+      <RouletteOverlay
+        room={room}
+        actorId={p.playerId}
+        iAct={iAct}
+        revealKey={p.revealedAt}
+        title="🎰 놉카드 도박"
+        note={`${actor?.name} · 놉카드 ${had}장`}
+        options={options}
+        pick={win ? 0 : 1}
+        resultText={resultText}
+        onDone={() => resolvePending(code, room, 'done')}
+      />
+    )
+  }
   return (
-    <RouletteOverlay
-      room={room}
-      actorId={p.playerId}
-      iAct={iAct}
-      revealKey={p.revealedAt}
-      title="🎰 놉카드 도박"
-      note={`${actor?.name} · 현재 놉카드 ${nop}장`}
-      options={[
-        { emoji: '🎫', label: '놉카드 +2', color: '#06d6a0' },
-        { emoji: '💀', label: nop > 0 ? `놉카드 ${nop}장 소멸` : '놉카드 없음 → 마시기', color: '#ea002c' },
-      ]}
-      pick={win ? 0 : 1}
-      resultText={win ? '놉카드 +2! 🎫🎫' : nop > 0 ? `놉카드 ${nop}장 소멸… 💀` : '카드가 없어서 대신 마셔! 🍶'}
-      onDone={() => resolvePending(code, room, 'done')}
-    />
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">🎰 놉카드 도박</div>
+        <h2>도박, 할까요?</h2>
+        <div className="muted">
+          <b style={{ color: actor?.color }}>{actor?.name}</b> — 현재 놉카드 {nop}장.{' '}
+          {nop > 0 ? (
+            <>
+              룰렛 50%로 <b>놉카드 +2</b> 아니면 <b>보유 놉카드 전부 소멸</b>이에요.
+            </>
+          ) : (
+            <>
+              카드가 없어서 룰렛 50%로 <b>안 마시기</b> 아니면 <b>마시기</b>예요.
+            </>
+          )}{' '}
+          안 해도 아무 일 없어요.
+        </div>
+        <div className="actions">
+          {iAct ? (
+            <>
+              <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'skip')}>
+                😌 안 할래요
+              </button>
+              <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'spin')}>
+                🎰 도박한다!
+              </button>
+            </>
+          ) : (
+            <div className="waiting">{actor?.name}이(가) 고민 중…</div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -941,7 +987,7 @@ function OptionTimers({ options }) {
           <div className={`timer ${left < 60000 ? 'soon' : ''}`} key={k}>
             <div className="timer-bar" style={{ width: `${pct}%` }} />
             <span className="timer-text">{o.text}</span>
-            <span className="timer-who">모두</span>
+            <span className="timer-who">{o.who || '모두'}</span>
             <span className="timer-time">{left === 0 ? '끝!' : `${mm}:${ss}`}</span>
           </div>
         )
@@ -1589,6 +1635,19 @@ export default function App() {
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>
             <h2>{pending.title || pendingCell.text}</h2>
+            {pending.kind === 'option' && pendingCell.pair && pending.partner && (
+              <div className="pair-card">
+                <span className="avatar" style={{ background: room.players[pending.playerId]?.color }}>
+                  {room.players[pending.playerId]?.name?.slice(0, 1)}
+                </span>
+                <b>{room.players[pending.playerId]?.name}</b>
+                <span className="heart">❤️</span>
+                <b>{room.players[pending.partner]?.name}</b>
+                <span className="avatar" style={{ background: room.players[pending.partner]?.color }}>
+                  {room.players[pending.partner]?.name?.slice(0, 1)}
+                </span>
+              </div>
+            )}
             {pending.kind === 'choose' && (
               <div className="cat-grid">
                 {[
@@ -1611,9 +1670,11 @@ export default function App() {
               {pending.kind === 'nop' && ' — 놉카드 1장이 지급되었어요.'}
               {(pending.kind === 'normal' || pending.kind === 'balance') && (iAct ? ' — 수행하거나 놉카드로 거부할 수 있어요.' : ' — 수행 중이에요.')}
               {pending.kind === 'option' &&
+                !pendingCell.pair &&
                 (room.options?.[`${pending.pos.track === 'main' ? 'm' : 'b'}${pending.pos.idx}`]?.endsAt > Date.now()
                   ? ` — 이미 진행 중인 옵션이에요. 모두에게 ${pendingCell.minutes || 10}분이 추가됩니다. (놉카드 사용 불가)`
                   : ` — 모두에게 적용되는 옵션이에요. ${pendingCell.minutes || 10}분 타이머가 전원 화면에 표시됩니다. (놉카드 사용 불가)`)}
+              {pending.kind === 'option' && pendingCell.pair && ` — 무작위로 정해진 짝과 ${pendingCell.minutes || 10}분 동안 벌칙을 함께 받아요. (놉카드 사용 불가)`}
               {pending.kind === 'release' && ' — 진행 중이던 옵션 타이머가 모두 종료됐어요.'}
               {pending.kind === 'steal' &&
                 (Object.entries(room.players).some(([pid, pl]) => pid !== pending.playerId && (pl.nop || 0) > 0)
