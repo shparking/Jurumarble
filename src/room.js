@@ -8,11 +8,12 @@
 //   event: { id, text },                                       // 토스트로 띄울 최근 이벤트
 //   cells: { [idx]: text }, bridgeCells: { [idx]: text }       // 방장이 편집한 칸 텍스트
 // }
-import { dbGet, dbSet, dbUpdate, dbRemove, dbOn, dbOnConnected, dbPresence, now, DEMO, demoSeed, dbPurgeOldRooms } from './db'
+import { dbGet, dbSet, dbUpdate, dbRemove, dbOn, dbOnConnected, dbPresence, now, DEMO, demoSeed, dbPurgeOldRooms, dbWatchServerOffset, serverNow } from './db'
 import './firebase'
 import { DEFAULT_CELLS, DEFAULT_BRIDGE, LAYOUTS, MAIN_COUNT, computePath, cellAt, cellsForLayout } from './game/board'
 import { BALANCE_TOPICS } from './game/balance'
 import { pickLiarWords } from './game/liar'
+import { pickBombTopic } from './game/bomb'
 import { autoEmoji } from './game/emoji'
 
 export const COLORS = ['#ea002c', '#2f6df6', '#1fa97a', '#f59e0b', '#8b5cf6', '#ec4899', '#0ea5e9', '#84cc16', '#14b8a6', '#f97316']
@@ -159,6 +160,10 @@ export function subscribeRoom(code, cb) {
   return dbOn(roomPath(code), cb)
 }
 
+export function watchServerOffset() {
+  return dbWatchServerOffset()
+}
+export { serverNow }
 export function subscribeConnection(cb) {
   return dbOnConnected(cb)
 }
@@ -283,6 +288,16 @@ function makePending(room, playerId, pos, kind, title) {
     p.startedAt = Date.now()
   }
   if (kind === 'choose') p.stage = 'choose'
+  if (kind === 'bomb') {
+    p.stage = 'ready' // ready → ticking (explodeAt) → 확인
+    p.topic = pickBombTopic()
+  }
+  if (kind === 'reaction') p.stage = 'ready' // ready → armed(goAt) → result
+  if (kind === 'gamble') {
+    // 놉카드 도박: 50% 놉카드 +2 / 50% 전부 소멸(없으면 대신 마시기)
+    p.roulette = Math.random() < 0.5 ? 'win' : 'lose'
+    p.revealedAt = Date.now()
+  }
   if (kind === 'aiPick') {
     // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
     const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
@@ -439,7 +454,8 @@ export async function resolvePending(code, room, action, target) {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
     if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
     if (p.kind === 'balance' && p.stage !== 'vote') return
-    if (p.kind === 'vote' || p.kind === 'choose' || p.kind === 'shuffle') return
+    if (p.kind === 'vote' || p.kind === 'choose' || p.kind === 'shuffle' || p.kind === 'gamble') return
+    if ((p.kind === 'bomb' || p.kind === 'reaction') && p.stage !== 'ready') return
     await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${id}/nop`]: Math.max(0, (me.nop || 0) - 1),
@@ -559,6 +575,55 @@ export async function resolvePending(code, room, action, target) {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: `🥂 의리주 순서: ${(p.order || []).map((pid) => room.players[pid]?.name).filter(Boolean).join(' → ')}` },
       })
+      return
+    }
+    case 'bomb': {
+      if (action === 'start' && p.stage === 'ready') {
+        // 15~40초 사이 랜덤 폭발 (서버 시각 기준)
+        const dur = 15000 + Math.floor(Math.random() * 25000)
+        await roomUpdate(code, { 'pending/stage': 'ticking', 'pending/startedAt': serverNow(), 'pending/explodeAt': serverNow() + dur })
+        return
+      }
+      if (action === 'done' && p.stage === 'ticking') {
+        await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text: `💣 폭탄 돌리기(${p.topic}) 터짐! 말하던 사람 마셔 🍶` } })
+      }
+      return
+    }
+    case 'reaction': {
+      if (action === 'start' && p.stage === 'ready') {
+        const wait = 2500 + Math.floor(Math.random() * 3500) // 2.5~6초 뒤 초록불
+        await roomUpdate(code, { 'pending/stage': 'armed', 'pending/goAt': serverNow() + wait, 'pending/results': null })
+        return
+      }
+      if (action === 'result' && p.stage === 'armed') {
+        await roomUpdate(code, { 'pending/stage': 'result', 'pending/revealedAt': Date.now() })
+        return
+      }
+      if (action === 'done' && p.stage === 'result') {
+        const r = reactionRanking(room, p)
+        const loser = r[r.length - 1]
+        await roomUpdate(code, {
+          ...nextTurnUpdates(room),
+          event: { id: newId(), text: loser ? `⚡ 반응속도 꼴찌 ${room.players[loser.pid]?.name} (${loser.label}) 마셔! 🍶` : '⚡ 반응속도 게임 종료' },
+        })
+      }
+      return
+    }
+    case 'gamble': {
+      if (action === 'done') {
+        const nop = me.nop || 0
+        const upd = { ...nextTurnUpdates(room) }
+        if (p.roulette === 'win') {
+          upd[`players/${id}/nop`] = nop + 2
+          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 성공! 놉카드 +2 🎫` }
+        } else if (nop > 0) {
+          upd[`players/${id}/nop`] = 0
+          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 실패… 놉카드 ${nop}장 소멸 💀` }
+        } else {
+          upd.event = { id: newId(), text: `🎰 ${me.name} 도박 실패… 놉카드가 없어서 대신 마셔! 🍶` }
+        }
+        await roomUpdate(code, upd)
+      }
       return
     }
     case 'hunmin': {
@@ -760,4 +825,28 @@ export function balanceResult(p) {
   const losers = tie || unanimous ? [] : A.length < B.length ? A : B
   const loserSide = losers.length ? (A.length < B.length ? 'A' : 'B') : null
   return { a: A.length, b: B.length, A, B, total, tie, unanimous, losers, loserSide }
+}
+
+// ---------- 반응속도 게임 ----------
+// 내 탭 기록: goAt 이전이면 부정출발('early'), 아니면 반응 시간(ms)
+export async function reactionTap(code, room) {
+  const p = room.pending
+  if (!p || p.kind !== 'reaction' || p.stage !== 'armed' || !p.goAt) return
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const id = DEMO ? ids.find((pid) => p.results?.[pid] == null) : myId()
+  if (!id || !ids.includes(id) || p.results?.[id] != null) return
+  const t = serverNow()
+  const val = t < p.goAt ? -1 : t - p.goAt
+  await roomUpdate(code, { [`pending/results/${id}`]: DEMO ? (val < 0 ? -1 : val + Math.floor(Math.random() * 300)) : val })
+}
+// 순위: 반응 빠른 순. 부정출발(-1)과 미참여는 맨 뒤
+export function reactionRanking(room, p) {
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const rows = ids.map((pid) => {
+    const v = p.results?.[pid]
+    if (v == null) return { pid, v: Infinity, label: '미참여' }
+    if (v < 0) return { pid, v: 1e9, label: '부정출발' }
+    return { pid, v, label: `${(v / 1000).toFixed(3)}초` }
+  })
+  return rows.sort((a, b) => a.v - b.v)
 }

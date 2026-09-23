@@ -40,6 +40,10 @@ import {
   voteTally,
   balanceVote,
   balanceResult,
+  reactionTap,
+  reactionRanking,
+  watchServerOffset,
+  serverNow,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -67,6 +71,9 @@ const KIND_LABEL = {
   vote: '다수결 지목',
   choose: '게임 선택권',
   shuffle: '의리주 순서',
+  bomb: '폭탄 돌리기',
+  reaction: '반응속도 게임',
+  gamble: '놉카드 도박',
 }
 
 function useTheme() {
@@ -325,7 +332,24 @@ function BalancePanel({ room, pending: p, me, iAct, code }) {
   const actor = room.players[p.playerId]
   const title = p.title || '밸런스 게임'
 
-  if (p.stage === 'roulette') return <RouletteOverlay room={room} pending={p} iAct={iAct} code={code} ta={ta} tb={tb} r={r} />
+  if (p.stage === 'roulette')
+    return (
+      <RouletteOverlay
+        room={room}
+        actorId={p.playerId}
+        iAct={iAct}
+        revealKey={p.revealedAt}
+        title="🎯 만장일치! 룰렛"
+        note={`${ta} ${r.a} : ${r.b} ${tb}`}
+        options={[
+          { emoji: '🍻', label: '다같이 마셔', color: '#f47725' },
+          { emoji: '😇', label: '아무도 안 마셔', color: '#4cc9f0' },
+        ]}
+        pick={p.roulette === 'drink' ? 0 : 1}
+        resultText={p.roulette === 'drink' ? '다같이 마셔! 🍻' : '아무도 안 마셔! 😇'}
+        onDone={() => resolvePending(code, room, 'done')}
+      />
+    )
   if (p.stage === 'result') {
     if (step > 0) return <CountOverlay step={step} emoji="⚖️" sub="투표 결과를 집계하고 있어요…" />
     const canNop = (DEMO || r.losers.includes(me)) && !p.refused?.[DEMO ? r.losers[0] : me] && (room.players[DEMO ? r.losers[0] : me]?.nop || 0) > 0
@@ -417,7 +441,7 @@ function BalancePanel({ room, pending: p, me, iAct, code }) {
 }
 
 // 만장일치 룰렛: 50/50 다같이 마셔 / 아무도 안 마셔
-function RouletteOverlay({ room, pending: p, iAct, code, ta, tb, r }) {
+function RouletteOverlay({ room, actorId, iAct, onDone, revealKey, title, note, options, pick, resultText }) {
   const [spun, setSpun] = useState(false)
   const [done, setDone] = useState(false)
   useEffect(() => {
@@ -429,7 +453,7 @@ function RouletteOverlay({ room, pending: p, iAct, code, ta, tb, r }) {
       clearTimeout(t1)
       clearTimeout(t2)
     }
-  }, [p.revealedAt])
+  }, [revealKey])
   useEffect(() => {
     if (done) {
       try {
@@ -437,9 +461,8 @@ function RouletteOverlay({ room, pending: p, iAct, code, ta, tb, r }) {
       } catch {}
     }
   }, [done])
-  const drink = p.roulette === 'drink'
-  // 바늘은 위(0deg). 'drink' 반쪽은 0~180deg(오른쪽), 'safe' 는 180~360deg(왼쪽)
-  const finalDeg = 360 * 5 + (drink ? 270 : 90) // 5바퀴 후 해당 반쪽 중앙이 바늘 아래로
+  // 바늘은 위(0deg). options[0] 은 0~180deg(오른쪽 반), options[1] 은 180~360deg(왼쪽 반)
+  const finalDeg = 360 * 5 + (pick === 0 ? 270 : 90)
   const pieces = Array.from({ length: 28 })
   return (
     <div className="ai-overlay">
@@ -451,34 +474,249 @@ function RouletteOverlay({ room, pending: p, iAct, code, ta, tb, r }) {
             ))}
           </div>
         )}
-        <div className="ai-congrats">🎯 만장일치! 룰렛</div>
-        <div className="ai-note">
-          {ta} {r.a} : {r.b} {tb}
-        </div>
+        <div className="ai-congrats">{title}</div>
+        {note && <div className="ai-note">{note}</div>}
         <div className="roulette">
           <div className="needle" />
-          <div className="wheel" style={{ transform: spun ? `rotate(${finalDeg}deg)` : 'rotate(0deg)' }}>
-            <span className="half drink">🍻</span>
-            <span className="half safe">😇</span>
+          <div className="wheel" style={{ transform: spun ? `rotate(${finalDeg}deg)` : 'rotate(0deg)', background: `conic-gradient(${options[0].color} 0deg 180deg, ${options[1].color} 180deg 360deg)` }}>
+            <span className="half drink">{options[0].emoji}</span>
+            <span className="half safe">{options[1].emoji}</span>
           </div>
         </div>
         <div className="roulette-legend">
-          <span>
-            <i className="sw drink" /> 다같이 마셔
-          </span>
-          <span>
-            <i className="sw safe" /> 아무도 안 마셔
-          </span>
+          {options.map((o, i) => (
+            <span key={i}>
+              <i className="sw" style={{ background: o.color }} /> {o.label}
+            </span>
+          ))}
         </div>
-        <div className="ai-name">{done ? drink ? <b>다같이 마셔! 🍻</b> : <b>아무도 안 마셔! 😇</b> : <span className="muted-light">돌아가는 중…</span>}</div>
+        <div className="ai-name">{done ? <b>{resultText}</b> : <span className="muted-light">돌아가는 중…</span>}</div>
         <div className="ai-actions">
           {done && iAct ? (
-            <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+            <button className="btn btn-primary" onClick={onDone}>
               확인
             </button>
           ) : done ? (
-            <div className="waiting">{room.players[p.playerId]?.name}이(가) 확인하면 다음 차례로</div>
+            <div className="waiting">{room.players[actorId]?.name}이(가) 확인하면 다음 차례로</div>
           ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 놉카드 도박: 룰렛 50% 놉카드 +2 / 전부 소멸(없으면 대신 마시기)
+function GamblePanel({ room, pending: p, iAct, code }) {
+  const actor = room.players[p.playerId]
+  const nop = actor?.nop || 0
+  const win = p.roulette === 'win'
+  return (
+    <RouletteOverlay
+      room={room}
+      actorId={p.playerId}
+      iAct={iAct}
+      revealKey={p.revealedAt}
+      title="🎰 놉카드 도박"
+      note={`${actor?.name} · 현재 놉카드 ${nop}장`}
+      options={[
+        { emoji: '🎫', label: '놉카드 +2', color: '#06d6a0' },
+        { emoji: '💀', label: nop > 0 ? `놉카드 ${nop}장 소멸` : '놉카드 없음 → 마시기', color: '#ea002c' },
+      ]}
+      pick={win ? 0 : 1}
+      resultText={win ? '놉카드 +2! 🎫🎫' : nop > 0 ? `놉카드 ${nop}장 소멸… 💀` : '카드가 없어서 대신 마셔! 🍶'}
+      onDone={() => resolvePending(code, room, 'done')}
+    />
+  )
+}
+
+// 폭탄 돌리기: 주제에 맞는 단어를 돌아가며 말하다가 랜덤 타이밍에 터짐 → 말하던 사람 마시기
+function BombPanel({ room, pending: p, iAct, code }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (p.stage !== 'ticking') return
+    const t = setInterval(() => tick((x) => x + 1), 100)
+    return () => clearInterval(t)
+  }, [p.stage])
+  const exploded = p.stage === 'ticking' && p.explodeAt && serverNow() >= p.explodeAt
+  const bombRef = useRef(false)
+  useEffect(() => {
+    if (exploded && !bombRef.current) {
+      bombRef.current = true
+      try {
+        navigator.vibrate?.([300, 100, 300, 100, 600])
+      } catch {}
+    }
+    if (!exploded) bombRef.current = false
+  }, [exploded])
+  const actor = room.players[p.playerId]
+  if (p.stage === 'ticking') {
+    return (
+      <div className={`ai-overlay bomb ${exploded ? 'boom' : ''}`}>
+        <div className="ai-reveal">
+          {exploded ? (
+            <>
+              <div className="bomb-emo">💥</div>
+              <div className="ai-congrats">터졌다!</div>
+              <div className="ai-name">
+                <b>지금 말하던 사람</b> 마셔! 🍶
+              </div>
+              <div className="ai-actions">
+                {iAct ? (
+                  <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+                    확인
+                  </button>
+                ) : (
+                  <div className="waiting">{actor?.name}이(가) 확인하면 다음 차례로</div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bomb-emo ticking">💣</div>
+              <div className="ai-note">주제</div>
+              <div className="bomb-topic">{p.topic}</div>
+              <div className="ai-sub">{actor?.name}부터 돌아가며 하나씩 말하세요. 언제 터질지 아무도 몰라요!</div>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">💣 {p.title || '폭탄 돌리기'}</div>
+        <h2>주제: {p.topic}</h2>
+        <div className="muted">
+          <b style={{ color: actor?.color }}>{actor?.name}</b>부터 시계 방향으로 주제에 맞는 단어를 하나씩 말해요. 폭탄은 15~40초 사이 아무 때나 터지고, 터질 때 말하던(또는 머뭇거리던) 사람이 마셔요. 이미 나온 단어를 말하거나 3초 넘게 뜸 들이면 그 사람이 마셔요.
+        </div>
+        <div className="actions">
+          {iAct ? (
+            <>
+              {(actor?.nop || 0) > 0 && (
+                <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
+                  <NopIcon /> 놉카드 사용
+                </button>
+              )}
+              <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'start')}>
+                💣 폭탄 시작
+              </button>
+            </>
+          ) : (
+            <div className="waiting">{actor?.name}이(가) 폭탄을 켜면 시작돼요</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// 반응속도 게임: 초록불이 되면 탭! 가장 느린 사람(부정출발 포함)이 마시기
+function ReactionPanel({ room, pending: p, me, iAct, code }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (p.stage !== 'armed') return
+    const t = setInterval(() => tick((x) => x + 1), 50)
+    return () => clearInterval(t)
+  }, [p.stage])
+  const actor = room.players[p.playerId]
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  if (p.stage === 'armed') {
+    const go = p.goAt && serverNow() >= p.goAt
+    const mine = DEMO ? null : p.results?.[me]
+    const tapped = mine != null
+    const doneCount = ids.filter((pid) => p.results?.[pid] != null).length
+    return (
+      <div className={`ai-overlay react ${go ? 'go' : 'wait'}`} onClick={() => !tapped && reactionTap(code, room)}>
+        <div className="ai-reveal">
+          {tapped ? (
+            <>
+              <div className="react-big">{mine < 0 ? '🚫' : '✅'}</div>
+              <div className="ai-congrats">{mine < 0 ? '부정출발!' : `${(mine / 1000).toFixed(3)}초`}</div>
+              <div className="ai-sub">
+                {doneCount}/{ids.length} 완료 · 다른 사람을 기다려요
+              </div>
+            </>
+          ) : go ? (
+            <>
+              <div className="react-big">👆</div>
+              <div className="ai-congrats big">탭!</div>
+            </>
+          ) : (
+            <>
+              <div className="react-big">✋</div>
+              <div className="ai-congrats">기다리세요…</div>
+              <div className="ai-sub">화면이 초록색으로 바뀌면 바로 탭! 먼저 누르면 부정출발</div>
+            </>
+          )}
+          {iAct && go && (
+            <div className="ai-actions" onClick={(e) => e.stopPropagation()}>
+              <button className="btn btn-primary" disabled={doneCount === 0} onClick={() => resolvePending(code, room, 'result')}>
+                결과 공개 {doneCount < ids.length ? `(${doneCount}/${ids.length})` : ''}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+  if (p.stage === 'result') {
+    const rows = reactionRanking(room, p)
+    const loser = rows[rows.length - 1]
+    return (
+      <div className="modal-backdrop">
+        <div className="modal">
+          <div className="kicker">⚡ {p.title || '반응속도 게임'}</div>
+          <h2>결과</h2>
+          <div className="shuffle-list">
+            {rows.map((r, i) => (
+              <div key={r.pid} className={`shuffle-row ${r.pid === loser?.pid ? 'loser' : ''}`}>
+                <span className="order">{i + 1}</span>
+                <span className="avatar sm" style={{ background: room.players[r.pid]?.color }}>
+                  {room.players[r.pid]?.name?.slice(0, 1)}
+                </span>
+                <span className="pname">{room.players[r.pid]?.name}</span>
+                <span className="tag tag-gray">{r.label}</span>
+                {r.pid === loser?.pid && <span className="tag">마셔! 🍶</span>}
+              </div>
+            ))}
+          </div>
+          <div className="actions">
+            {iAct ? (
+              <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+                확인
+              </button>
+            ) : (
+              <div className="waiting">{actor?.name}이(가) 확인하면 다음 차례로</div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">⚡ {p.title || '반응속도 게임'}</div>
+        <h2>초록불이 되면 탭!</h2>
+        <div className="muted">
+          시작하면 모든 폰이 빨간 화면으로 바뀌고, 2~6초 뒤 아무 때나 초록색 "탭!"이 떠요. 가장 빨리 탭한 순서로 순위가 나오고 <b>가장 느린 사람이 마셔요.</b> 초록불 전에 누르면 부정출발로 꼴찌!
+        </div>
+        <div className="actions">
+          {iAct ? (
+            <>
+              {(actor?.nop || 0) > 0 && (
+                <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
+                  <NopIcon /> 놉카드 사용
+                </button>
+              )}
+              <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'start')}>
+                ⚡ 시작
+              </button>
+            </>
+          ) : (
+            <div className="waiting">{actor?.name}이(가) 시작하면 준비하세요</div>
+          )}
         </div>
       </div>
     </div>
@@ -823,6 +1061,7 @@ export default function App() {
   const lastEventId = useRef(null)
 
   useEffect(() => subscribeConnection(setConnected), [])
+  useEffect(() => watchServerOffset(), [])
 
   // 앱을 열 때 한 번: 대기실에서 1시간 넘게 시작 안 한 방 / 하루 지난 방 정리
   useEffect(() => {
@@ -1328,6 +1567,11 @@ export default function App() {
       {/* ---------- 다수결 지목 ---------- */}
       {room && showPending && pending.kind === 'vote' && <VotePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
 
+      {/* ---------- 폭탄 / 반응속도 / 놉카드 도박 ---------- */}
+      {room && showPending && pending.kind === 'bomb' && <BombPanel room={room} pending={pending} iAct={iAct} code={code} />}
+      {room && showPending && pending.kind === 'reaction' && <ReactionPanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
+      {room && showPending && pending.kind === 'gamble' && <GamblePanel room={room} pending={pending} iAct={iAct} code={code} />}
+
       {/* ---------- 밸런스 게임 ---------- */}
       {room && showPending && pending.kind === 'balance' && <BalancePanel room={room} pending={pending} me={me} iAct={iAct} code={code} />}
 
@@ -1340,7 +1584,7 @@ export default function App() {
       )}
 
       {/* ---------- 도착 칸 모달 ---------- */}
-      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin', 'shuffle', 'balance'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
+      {room && showPending && !picking && !autoKind && !['aiPick', 'vote', 'hunmin', 'shuffle', 'balance', 'bomb', 'reaction', 'gamble'].includes(pending.kind) && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>

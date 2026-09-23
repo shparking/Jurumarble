@@ -79,6 +79,16 @@ export function dbOnConnected(cb) {
   }
   return onValue(ref(fbDb, '.info/connected'), (snap) => cb(!!snap.val()))
 }
+// 서버 시간 보정: 폰마다 시계가 조금씩 달라서, 동시에 시작해야 하는 게임(반응속도 등)은 서버 시각 기준으로 맞춤
+let serverOffset = 0
+export function dbWatchServerOffset() {
+  if (DEMO || !fbDb) return () => {}
+  return onValue(ref(fbDb, '.info/serverTimeOffset'), (snap) => {
+    serverOffset = Number(snap.val()) || 0
+  })
+}
+export const serverNow = () => Date.now() + serverOffset
+
 export function dbPresence(path) {
   if (DEMO) return memSet(path, true)
   const r = ref(fbDb, path)

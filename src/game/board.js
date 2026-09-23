@@ -9,15 +9,15 @@ export const BRIDGE_ENTRANCE = 14 // 이 칸에 정확히 멈추면 다음 턴�
 export const BRIDGE_EXIT = 29 // 다리 마지막 칸 다음에 도착하는 칸
 
 // type: normal | nop(놉카드 지급) | move(delta) | goStart(출발로) | rest(휴식) | home(출발) | travel(세계여행: 원하는 칸으로)
-// locked: true 인 칸(출발·세계여행·앞으로 3칸·뒤로 1칸)은 방장도 편집 불가. 그 외 칸은 편집하면 '일반 칸'이 됨
+// locked: true 인 칸(출발·세계여행)은 방장도 편집 불가. 그 외 칸은 편집하면 '일반 칸'이 됨
 export const DEFAULT_CELLS = [
   { id: 0, emoji: '🚩', text: '출발', type: 'home', locked: true },
   { id: 1, emoji: '📝', text: '훈민정음 게임', type: 'hunmin' },
   { id: 2, emoji: '👀', text: '눈치게임' },
   { id: 3, emoji: '🤖', text: 'AI 지목 마셔!', type: 'aiPick' },
   { id: 4, emoji: '🍻', text: '다같이 마셔!' },
-  { id: 5, emoji: '⏩', text: '앞으로 3칸', type: 'move', delta: 3, locked: true },
-  { id: 6, emoji: '☕', text: '휴식', type: 'rest' },
+  { id: 5, emoji: '💣', text: '폭탄 돌리기', type: 'bomb' },
+  { id: 6, emoji: '⚡', text: '반응속도\n게임', type: 'reaction' },
   { id: 7, emoji: '🖐️', text: '손병호 게임' },
   { id: 8, emoji: '👉', text: '너! 마셔! (지목)' },
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
@@ -35,7 +35,7 @@ export const DEFAULT_CELLS = [
   { id: 21, emoji: '🍶', text: '00년생 마셔!' },
   { id: 22, emoji: '🍶', text: '99년생 마셔!' },
   { id: 23, emoji: '🥃', text: '혼술 마셔!' },
-  { id: 24, emoji: '⏪', text: '뒤로 1칸', type: 'move', delta: -1, locked: true },
+  { id: 24, emoji: '🎰', text: '놉카드 도박', type: 'gamble' },
   { id: 25, emoji: '✈️', text: '세계여행', type: 'travel', locked: true },
   { id: 26, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 27, emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
