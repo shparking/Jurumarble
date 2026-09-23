@@ -135,6 +135,12 @@ function Icon({ name }) {
   }
 }
 
+// 투표 완료 판정: 접속이 끊긴 사람은 제외하고 모두가 투표했는지
+function allVoted(room, ids, votes) {
+  const active = ids.filter((pid) => room.players[pid]?.online !== false)
+  return active.length > 0 && active.every((pid) => votes[pid] != null)
+}
+
 // 3, 2, 1 카운트다운 (key 가 바뀌면 다시 시작). 3→2→1→0(공개)
 function useCountdown(key) {
   const [step, setStep] = useState(3)
@@ -279,7 +285,7 @@ function VotePanel({ room, pending: p, me, iAct, code }) {
         </div>
         <div className="actions">
           {iAct ? (
-            <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount === 0}>
+            <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={!allVoted(room, ids, votes)}>
               결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
             </button>
           ) : (
@@ -421,7 +427,7 @@ function BalancePanel({ room, pending: p, me, iAct, code }) {
                   <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'reroll')} title="다른 주제">
                     🔄 다른 주제
                   </button>
-                  <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount < Math.min(2, ids.length)}>
+                  <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={!allVoted(room, ids, votes)}>
                     결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
                   </button>
                 </>
@@ -688,7 +694,7 @@ function ReactionPanel({ room, pending: p, me, iAct, code }) {
           )}
           {iAct && go && (
             <div className="ai-actions" onClick={(e) => e.stopPropagation()}>
-              <button className="btn btn-primary" disabled={doneCount === 0} onClick={() => resolvePending(code, room, 'result')}>
+              <button className="btn btn-primary" disabled={!allVoted(room, ids, p.results || {})} onClick={() => resolvePending(code, room, 'result')}>
                 결과 공개 {doneCount < ids.length ? `(${doneCount}/${ids.length})` : ''}
               </button>
             </div>
@@ -885,7 +891,7 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
             </div>
             <div className="actions">
               {iAct ? (
-                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount === 0}>
+                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={!allVoted(room, ids, votes)}>
                   결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
                 </button>
               ) : (
@@ -1084,7 +1090,7 @@ function MissionQuiz({ room, me, code }) {
         )}
         <div className="actions">
           {canControl ? (
-            <button className="btn btn-primary" onClick={() => missionReveal(code, room)} disabled={votedCount === 0}>
+            <button className="btn btn-primary" onClick={() => missionReveal(code, room)} disabled={!allVoted(room, voters, votes)}>
               결과 공개 {votedCount < voters.length ? `(${votedCount}/${voters.length})` : ''}
             </button>
           ) : (
