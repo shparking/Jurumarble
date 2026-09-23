@@ -562,10 +562,6 @@ export async function resolvePending(code, room, action, target) {
       return
     }
     case 'hunmin': {
-      if (action === 'reroll') {
-        await roomUpdate(code, { 'pending/chosung': pickChosung(p.chosung) })
-        return
-      }
       await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text: `${me.name} 훈민정음 (${p.chosung}) 수행 ✅` } })
       return
     }

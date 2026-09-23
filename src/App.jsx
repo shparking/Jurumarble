@@ -294,9 +294,6 @@ function HunminPanel({ room, pending: p, iAct, code, keyId }) {
         </div>
         {iAct ? (
           <div className="actions">
-            <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'reroll')}>
-              🔄 다른 초성
-            </button>
             {(actor?.nop || 0) > 0 && (
               <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
                 <NopIcon /> 놉카드 사용
