@@ -11,7 +11,9 @@ function fitOne(el, wrap, max, min) {
   const cs = getComputedStyle(box)
   const emo = box.querySelector('.emo')
   const emoH = emo ? emo.getBoundingClientRect().height + parseFloat(getComputedStyle(emo).marginBottom || 0) : 0
-  const innerH = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - emoH
+  const badge = box.querySelector('.opt-badge')
+  const badgeH = badge ? badge.getBoundingClientRect().height + parseFloat(getComputedStyle(badge).marginTop || 0) : 0
+  const innerH = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - emoH - badgeH
   const innerW = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
   el.style.overflowWrap = wrap
   let size = max
@@ -95,6 +97,7 @@ export default function Board({ cells, bridge, tokenPos, character, activeKey, p
       </span>
       {(cell.emoji || ICONS[cell.type]) && <span className="emo">{cell.emoji || ICONS[cell.type]}</span>}
       <span className="txt">{cell.text}</span>
+      {cell.type === 'option' && <span className="opt-badge">Option</span>}
       {cell.type === 'home' && (
         <svg className="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-label="진행 방향">
           <path d="M5 12h13" />

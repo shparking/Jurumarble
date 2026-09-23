@@ -29,10 +29,15 @@ import {
   lobbyOrder,
   moveOrder,
   shuffleOrder,
+  liarReveal,
+  liarVote,
+  liarResult,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
 import { autoEmoji } from './game/emoji'
+import { LIAR_CATEGORIES, liarCategory } from './game/liar'
+import { DEFAULT_CELLS, DEFAULT_BRIDGE } from './game/board'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -49,6 +54,7 @@ const KIND_LABEL = {
   release: '옵션 해제',
   steal: '놉카드 뺏기',
   aiPick: 'AI 지목',
+  liar: '라이어 게임',
 }
 
 function useTheme() {
@@ -159,6 +165,150 @@ function AiPickOverlay({ room, pending, me, iAct, onDone, onTargetNop }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// 라이어 게임(워드 울프): 키워드 확인 → 설명 → 투표 → 결과. 모든 폰에 표시
+function LiarPanel({ room, pending: p, me, iAct, code }) {
+  const [show, setShow] = useState(false)
+  useEffect(() => setShow(false), [p.stage])
+  const ids = Object.keys(p.words || {}).filter((pid) => room.players[pid]?.name)
+  const myWord = DEMO ? p.majority : p.words?.[me]
+  const revealedCount = ids.filter((pid) => p.revealed?.[pid]).length
+  const votes = p.votes || {}
+  const votedCount = ids.filter((pid) => votes[pid]).length
+  const myVote = DEMO ? null : votes[me]
+  const cat = liarCategory(p.category)
+  // 설명 순서: 행동 주체부터 차례대로
+  const order = roomOrder(room)
+  const startIdx = Math.max(0, order.indexOf(p.playerId))
+  const speak = [...order.slice(startIdx), ...order.slice(0, startIdx)].filter((pid) => ids.includes(pid))
+  const res = p.stage === 'result' ? liarResult(room, p) : null
+  return (
+    <div className="modal-backdrop">
+      <div className="modal liar">
+        <div className="kicker">🤥 라이어 게임 · {cat.emoji} {cat.name}</div>
+        {p.stage === 'reveal' && (
+          <>
+            <h2>각자 키워드를 확인하세요!</h2>
+            <div className="muted">한 명만 비슷하지만 다른 키워드를 받았어요. 누가 라이어인지는 본인도 몰라요. 키워드를 직접 말하지 말고 관련 설명만 하세요.</div>
+            {myWord ? (
+              <button
+                className={`word-card ${show ? 'on' : ''}`}
+                onClick={() => {
+                  setShow((v) => !v)
+                  if (!show) liarReveal(code, room)
+                }}
+              >
+                {show ? (
+                  <>
+                    <span className="word-label">내 키워드</span>
+                    <span className="word">{myWord}</span>
+                    <span className="word-hint">다시 탭하면 숨겨요</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="word-label">탭해서 확인</span>
+                    <span className="word">🔒</span>
+                    <span className="word-hint">다른 사람이 보지 않게 조심!</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="muted" style={{ marginTop: 12 }}>
+                이 게임에 참여하지 않은 참가자예요 (게임 시작 후 입장).
+              </div>
+            )}
+            <div className="section-title">설명 순서 · 확인 {revealedCount}/{ids.length}</div>
+            <div className="speak-list">
+              {speak.map((pid, i) => (
+                <span key={pid} className={`speak ${p.revealed?.[pid] ? 'ok' : ''}`}>
+                  <b>{i + 1}</b> {room.players[pid].name}
+                  {p.revealed?.[pid] ? ' ✓' : ''}
+                </span>
+              ))}
+            </div>
+            <div className="actions">
+              {iAct ? (
+                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'vote-start')}>
+                  설명 끝 → 투표 시작 {revealedCount < ids.length ? `(확인 ${revealedCount}/${ids.length})` : ''}
+                </button>
+              ) : (
+                <div className="waiting">설명이 끝나면 {room.players[p.playerId]?.name}이(가) 투표를 시작해요</div>
+              )}
+            </div>
+          </>
+        )}
+        {p.stage === 'vote' && (
+          <>
+            <h2>라이어는 누구?</h2>
+            <div className="muted">다른 키워드를 받은 것 같은 사람을 한 명 고르세요. ({votedCount}/{ids.length} 투표)</div>
+            <div className="steal-list">
+              {ids.map((pid) => {
+                const pl = room.players[pid]
+                const n = Object.values(votes).filter((t) => t === pid).length
+                return (
+                  <button key={pid} className={`steal-btn ${myVote === pid ? 'picked' : ''}`} disabled={!DEMO && !p.words?.[me]} onClick={() => liarVote(code, room, pid)}>
+                    <span className="avatar sm" style={{ background: pl.color }}>
+                      {pl.name.slice(0, 1)}
+                    </span>
+                    <span className="pname">{pl.name}</span>
+                    {n > 0 && <span className="tag">{n}표</span>}
+                    {myVote === pid && <span className="me-tag">내 표</span>}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="actions">
+              {iAct ? (
+                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'result')} disabled={votedCount === 0}>
+                  결과 공개 {votedCount < ids.length ? `(${votedCount}/${ids.length})` : ''}
+                </button>
+              ) : (
+                <div className="waiting">모두 투표하면 {room.players[p.playerId]?.name}이(가) 결과를 공개해요</div>
+              )}
+            </div>
+          </>
+        )}
+        {p.stage === 'result' && res && (
+          <>
+            <h2>{res.caught ? '🎉 시민 승리!' : '🤥 라이어 승리!'}</h2>
+            <div className="liar-reveal">
+              <div className="liar-row">
+                <span className="avatar" style={{ background: room.players[p.liar]?.color }}>
+                  {room.players[p.liar]?.name?.slice(0, 1)}
+                </span>
+                <div>
+                  <div className="muted">라이어</div>
+                  <b>{room.players[p.liar]?.name}</b>
+                </div>
+              </div>
+              <div className="liar-words">
+                <span>
+                  다수 키워드 <b>{p.majority}</b>
+                </span>
+                <span>
+                  라이어 키워드 <b>{p.minority}</b>
+                </span>
+              </div>
+              <div className="muted">
+                {res.top ? `최다 득표: ${room.players[res.top]?.name}` : '투표 없음'} ·{' '}
+                {res.caught ? `라이어 ${room.players[p.liar]?.name} 마셔! 🍶` : `${room.players[p.liar]?.name} 빼고 다 마셔! 🍻`}
+              </div>
+            </div>
+            <div className="actions">
+              {iAct ? (
+                <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
+                  확인
+                </button>
+              ) : (
+                <div className="waiting">{room.players[p.playerId]?.name}이(가) 확인하면 다음 차례로</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -537,7 +687,7 @@ export default function App() {
       if (posKey(p) === posKey(room.pos)) return
       return resolvePending(code, room, 'pick', p)
     }
-    if (isHost && !cell.locked && (room.status === 'lobby' || !pending)) {
+    if (isHost && !cell.locked && room.status === 'lobby') {
       setEditing({ pos: p, cell, text: cell.text })
       return
     }
@@ -667,7 +817,7 @@ export default function App() {
 
           {isHost ? (
             <div className="card card-pad stack">
-              <div className="muted">아래 보드에서 칸을 탭하면 내용을 고칠 수 있어요. (출발·세계여행은 고정)</div>
+              <div className="muted">아래 보드에서 칸을 탭하면 내용을 고칠 수 있어요. 게임이 시작되면 고칠 수 없어요. (출발·세계여행·이동 칸은 고정)</div>
               <button className="btn btn-primary btn-block" onClick={() => startGame(code, room)} disabled={playerCount < 2}>
                 {playerCount < 2 ? '2명 이상 모이면 시작할 수 있어요' : '게임 시작'}
               </button>
@@ -790,8 +940,13 @@ export default function App() {
         />
       )}
 
+      {/* ---------- 라이어 게임 ---------- */}
+      {room && showPending && pending.kind === 'liar' && pending.stage !== 'category' && (
+        <LiarPanel room={room} pending={pending} me={me} iAct={iAct} code={code} />
+      )}
+
       {/* ---------- 도착 칸 모달 ---------- */}
-      {room && showPending && !picking && !autoKind && pending.kind !== 'aiPick' && pendingCell && (
+      {room && showPending && !picking && !autoKind && pending.kind !== 'aiPick' && !(pending.kind === 'liar' && pending.stage !== 'category') && pendingCell && (
         <div className="modal-backdrop">
           <div className="modal">
             <div className="kicker">{KIND_LABEL[pending.kind] || (pending.pos.track === 'bridge' ? '다리 칸' : `${pending.pos.idx}번 칸`)}</div>
@@ -818,8 +973,19 @@ export default function App() {
               {pending.kind === 'goStart' && ' — 출발 칸으로 돌아갑니다.'}
               {pending.kind === 'travel' && ' — 말을 원하는 칸으로 옮기고, 그 칸의 내용을 실행해요.'}
               {pending.kind === 'rest' && ' — 이번 턴은 쉬어가요.'}
+              {pending.kind === 'liar' && (iAct ? ' — 키워드 카테고리를 고르면 모두에게 키워드가 배정돼요. 한 명만 비슷하지만 다른 키워드를 받아요.' : ' — 카테고리를 고르고 있어요.')}
               {pending.kind === 'home' && ' — 출발 칸이에요. 아무 일도 없어요.'}
             </div>
+            {pending.kind === 'liar' && (
+              <div className="cat-grid">
+                {LIAR_CATEGORIES.map((c) => (
+                  <button key={c.key} className="cat-btn" disabled={!iAct} onClick={() => resolvePending(code, room, 'category', c.key)}>
+                    <span className="cat-emo">{c.emoji}</span>
+                    <span>{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {pending.kind === 'steal' && (
               <div className="steal-list">
                 {Object.entries(room.players)
@@ -849,12 +1015,12 @@ export default function App() {
                     🔄 다른 주제
                   </button>
                 )}
-                {(pending.kind === 'normal' || pending.kind === 'balance') && (room.players[pending.playerId]?.nop || 0) > 0 && (
+                {(pending.kind === 'normal' || pending.kind === 'balance' || pending.kind === 'liar') && (room.players[pending.playerId]?.nop || 0) > 0 && (
                   <button className="btn btn-ghost" onClick={() => resolvePending(code, room, 'nop-use')}>
                     <NopIcon /> 놉카드 사용
                   </button>
                 )}
-                {!(pending.kind === 'steal' && Object.entries(room.players).some(([pid, pl]) => pid !== pending.playerId && (pl.nop || 0) > 0)) && (
+                {pending.kind !== 'liar' && !(pending.kind === 'steal' && Object.entries(room.players).some(([pid, pl]) => pid !== pending.playerId && (pl.nop || 0) > 0)) && (
                 <button className="btn btn-primary" onClick={() => resolvePending(code, room, 'done')}>
                   {pending.kind === 'normal' || pending.kind === 'balance' ? '수행 완료' : pending.kind === 'option' ? (room.options?.[`${pending.pos.track === 'main' ? 'm' : 'b'}${pending.pos.idx}`]?.endsAt > Date.now() ? `⏱ +${pendingCell.minutes || 10}분 추가` : `⏱ ${pendingCell.minutes || 10}분 시작`) : pending.kind === 'travel' ? '칸 선택하기' : '확인'}
                 </button>
@@ -908,13 +1074,30 @@ export default function App() {
             </div>
             {editing.cell.type && editing.cell.type !== 'normal' && (
               <div className="muted" style={{ marginTop: 8 }}>
-                이 칸의 효과({KIND_LABEL[editing.cell.type] || editing.cell.type})는 그대로 유지되고 글자만 바뀌어요.
+                ⚠️ 내용을 바꾸면 이 칸의 기능({KIND_LABEL[editing.cell.type] || editing.cell.type})은 사라지고, 도착하면 글자와 <b>수행 완료</b> 버튼만 나오는 일반 칸이 돼요.
+              </div>
+            )}
+            {editing.cell.edited && (
+              <div className="muted" style={{ marginTop: 8 }}>
+                이 칸은 수정된 칸이에요. 원래 내용과 기능으로 되돌리려면 <b>원래대로</b>를 누르세요.
               </div>
             )}
             <div className="actions">
               <button className="btn btn-ghost" onClick={() => setEditing(null)}>
                 취소
               </button>
+              {editing.cell.edited && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    const base = editing.pos.track === 'main' ? DEFAULT_CELLS[editing.pos.idx] : DEFAULT_BRIDGE[editing.pos.idx]
+                    saveCellText(code, room, editing.pos, base.text)
+                    setEditing(null)
+                  }}
+                >
+                  원래대로
+                </button>
+              )}
               <button
                 className="btn btn-primary"
                 onClick={() => {

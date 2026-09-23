@@ -12,6 +12,7 @@ import { dbGet, dbSet, dbUpdate, dbRemove, dbOn, dbOnConnected, dbPresence, now,
 import './firebase'
 import { DEFAULT_CELLS, DEFAULT_BRIDGE, LAYOUTS, MAIN_COUNT, computePath, cellAt, cellsForLayout } from './game/board'
 import { BALANCE_TOPICS } from './game/balance'
+import { pickLiarWords } from './game/liar'
 import { autoEmoji } from './game/emoji'
 
 export const COLORS = ['#ea002c', '#2f6df6', '#1fa97a', '#f59e0b', '#8b5cf6', '#ec4899', '#0ea5e9', '#84cc16', '#14b8a6', '#f97316']
@@ -144,8 +145,9 @@ export function setupPresence(code) {
 
 // ---------- 방 상태에서 파생되는 값 ----------
 // 방장이 텍스트를 바꾼 칸은 그 내용에 맞는 이모지를 자동으로 붙임
+// 방장이 내용을 바꾼 칸: 원래 기능(놉카드·옵션·밸런스 등)은 사라지고 '수행 완료'만 있는 일반 칸이 됨
 function withOverride(c, text) {
-  return { ...c, text, emoji: autoEmoji(text, c.emoji) }
+  return { id: c.id, text, emoji: autoEmoji(text), type: 'normal', edited: true }
 }
 export function roomCells(room) {
   const base = cellsForLayout(DEFAULT_CELLS, room.layout || 'landscape')
@@ -216,6 +218,7 @@ function pendingFor(room, playerId, pos) {
   const kind = cell.type || 'normal'
   const p = { kind, playerId, pos }
   if (kind === 'balance') p.topic = pickTopic(room)
+  if (kind === 'liar') p.stage = 'category' // category → reveal → vote → result
   if (kind === 'aiPick') {
     // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
     const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
@@ -351,6 +354,7 @@ export async function resolvePending(code, room, action, target) {
 
   if (action === 'nop-use') {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
+    if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
     await dbUpdate(roomPath(code), {
       ...nextTurnUpdates(room),
       [`players/${id}/nop`]: Math.max(0, (me.nop || 0) - 1),
@@ -441,6 +445,38 @@ export async function resolvePending(code, room, action, target) {
       })
       return
     }
+    case 'liar': {
+      // 'category' + target(카테고리 key): 단어 배정 → 확인 단계
+      if (action === 'category' && target) {
+        const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+        const liar = ids[Math.floor(Math.random() * ids.length)]
+        const [majority, minority] = pickLiarWords(target)
+        const words = {}
+        ids.forEach((pid) => (words[pid] = pid === liar ? minority : majority))
+        await dbUpdate(roomPath(code), {
+          pending: { ...p, stage: 'reveal', category: target, liar, words, majority, minority, revealed: null, votes: null },
+          event: { id: newId(), text: `🤥 라이어 게임 시작! 각자 키워드를 확인하세요` },
+        })
+        return
+      }
+      if (action === 'vote-start') {
+        await dbUpdate(roomPath(code), { 'pending/stage': 'vote', event: { id: newId(), text: `🗳️ 투표 시간! 라이어 같은 사람을 고르세요` } })
+        return
+      }
+      if (action === 'result') {
+        await dbUpdate(roomPath(code), { 'pending/stage': 'result' })
+        return
+      }
+      if (action === 'done' && p.stage === 'result') {
+        const r = liarResult(room, p)
+        await dbUpdate(roomPath(code), {
+          ...nextTurnUpdates(room),
+          event: { id: newId(), text: r.caught ? `시민 승리! 라이어 ${room.players[p.liar]?.name} 마셔 🍶` : `라이어 승리! ${room.players[p.liar]?.name} 빼고 다 마셔 🍻` },
+        })
+        return
+      }
+      return
+    }
     case 'aiPick': {
       const t = room.players[p.target]
       await dbUpdate(roomPath(code), {
@@ -475,7 +511,7 @@ export async function useNopAnytime(code, room) {
 
 // 방장: 칸 텍스트 편집 (locked 칸 제외)
 export async function saveCellText(code, room, pos, text) {
-  if (room.hostId !== myId()) return
+  if (room.hostId !== myId() || room.status !== 'lobby') return
   const key = pos.track === 'main' ? `cells/${pos.idx}` : `bridgeCells/${pos.idx}`
   const base = pos.track === 'main' ? cellsForLayout(DEFAULT_CELLS, room.layout || 'landscape')[pos.idx] : DEFAULT_BRIDGE[pos.idx]
   if (base.locked) return
@@ -503,4 +539,38 @@ export async function restartGame(code, room) {
   const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null }
   Object.keys(room.players || {}).forEach((pid) => (updates[`players/${pid}/nop`] = 0))
   await dbUpdate(roomPath(code), updates)
+}
+
+// ---------- 라이어 게임: 모든 참가자가 쓰는 동작 ----------
+// 내 키워드를 확인했다고 표시
+export async function liarReveal(code, room) {
+  const p = room.pending
+  const id = DEMO ? null : myId()
+  if (!p || p.kind !== 'liar' || p.stage !== 'reveal') return
+  if (DEMO) {
+    // 데모: 모든 참가자를 확인 처리
+    const upd = {}
+    Object.keys(p.words || {}).forEach((pid) => (upd[`pending/revealed/${pid}`] = true))
+    return dbUpdate(roomPath(code), upd)
+  }
+  if (!p.words?.[id]) return
+  await dbUpdate(roomPath(code), { [`pending/revealed/${id}`]: true })
+}
+// 투표 (본인 표만)
+export async function liarVote(code, room, target) {
+  const p = room.pending
+  if (!p || p.kind !== 'liar' || p.stage !== 'vote' || !target) return
+  const id = DEMO ? Object.keys(p.words || {}).find((pid) => !p.votes?.[pid]) : myId()
+  if (!id || !p.words?.[id]) return
+  await dbUpdate(roomPath(code), { [`pending/votes/${id}`]: target })
+}
+// 결과 계산: 최다 득표(단독)가 라이어면 시민 승리
+export function liarResult(room, p) {
+  const tally = {}
+  Object.values(p.votes || {}).forEach((t) => (tally[t] = (tally[t] || 0) + 1))
+  const sorted = Object.entries(tally).sort((a, b) => b[1] - a[1])
+  const top = sorted[0]
+  const unique = top && (!sorted[1] || sorted[1][1] < top[1])
+  const caught = !!(unique && top[0] === p.liar)
+  return { tally, top: top?.[0] || null, caught }
 }
