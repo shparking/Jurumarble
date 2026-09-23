@@ -12,16 +12,16 @@ export const BRIDGE_EXIT = 29 // 다리 마지막 칸 다음에 도착하는 칸
 // locked: true 인 칸(출발·세계여행·이동 칸)은 방장도 편집 불가. 그 외 칸은 편집하면 '일반 칸'이 됨
 export const DEFAULT_CELLS = [
   { id: 0, emoji: '🚩', text: '출발', type: 'home', locked: true },
-  { id: 1, emoji: '📝', text: '훈민정음 게임' },
+  { id: 1, emoji: '📝', text: '훈민정음 게임', type: 'hunmin' },
   { id: 2, emoji: '👀', text: '눈치게임' },
   { id: 3, emoji: '🤖', text: 'AI 지목 마셔!', type: 'aiPick' },
   { id: 4, emoji: '🍻', text: '다같이 마셔!' },
-  { id: 5, emoji: '⏩', text: '앞으로 2칸', type: 'move', delta: 2, locked: true },
+  { id: 5, emoji: '⏩', text: '앞으로 3칸', type: 'move', delta: 3, locked: true },
   { id: 6, emoji: '☕', text: '휴식', type: 'rest' },
   { id: 7, emoji: '↩️', text: '출발로 다시 이동', type: 'goStart', locked: true },
   { id: 8, emoji: '👉', text: '너! 마셔! (지목)' },
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
-  { id: 10, emoji: '🍾', text: '소주병 돌리기' },
+  { id: 10, emoji: '🎁', text: '게임 선택권', type: 'choose' },
   { id: 11, emoji: '🍶', text: '박상혁만 마셔!' },
   { id: 12, emoji: '⚙️', text: '10분 영어금지', type: 'option', minutes: 10 },
   { id: 13, emoji: '🤥', text: '라이어 게임', type: 'liar' },
@@ -41,7 +41,7 @@ export const DEFAULT_CELLS = [
   { id: 27, emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
   { id: 28, emoji: '🍶', text: '박상혁빼고\n다 마셔!' },
   { id: 29, emoji: '⚙️', text: '투터치', type: 'option', minutes: 10 },
-  { id: 30, emoji: '🗳️', text: '다수결 지목\n너 마셔!' },
+  { id: 30, emoji: '🗳️', text: '다수결 지목\n너 마셔!', type: 'vote' },
   { id: 31, emoji: '⚖️', text: '밸런스 게임', type: 'balance' },
 ]
 

@@ -125,6 +125,7 @@ export async function joinRoom(code, name) {
   if (room == null) throw new Error('그런 방이 없어요. 코드를 다시 확인해주세요.')
   const id = myId()
   const players = room.players || {}
+  if (room.kicked?.[id]) throw new Error('방장이 이 방에서 내보낸 참가자예요.')
   if (!players[id]?.name) {
     if (room.status !== 'lobby') throw new Error('이미 시작된 게임이에요.')
     if (Object.keys(players).length >= 10) throw new Error('방이 가득 찼어요 (최대 10명).')
@@ -215,6 +216,19 @@ export async function shuffleOrder(code, room) {
   await roomUpdate(code, { order: shuffle(lobbyOrder(room)), orderSet: true })
 }
 
+// 방장: 대기실에서 참가자 강퇴 (다시 못 들어옴)
+export async function kickPlayer(code, room, playerId) {
+  if (room.hostId !== myId() || room.status !== 'lobby' || playerId === myId()) return
+  const name = room.players?.[playerId]?.name || ''
+  const order = lobbyOrder(room).filter((id) => id !== playerId)
+  await roomUpdate(code, {
+    [`players/${playerId}`]: null,
+    [`kicked/${playerId}`]: true,
+    order: room.orderSet ? order : null,
+    event: { id: newId(), text: `${name} 님이 방에서 나갔어요 (방장 강퇴)` },
+  })
+}
+
 export async function startGame(code, room) {
   const order = room.orderSet ? lobbyOrder(room) : shuffle(lobbyOrder(room))
   await roomUpdate(code, {
@@ -236,12 +250,29 @@ export function pickTopic(room) {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
+// 훈민정음: 두 글자 초성 (흔한 자음만)
+const CHOSUNG = ['ㄱ', 'ㄴ', 'ㄷ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅅ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
+export function pickChosung(prev) {
+  let c
+  do {
+    c = CHOSUNG[Math.floor(Math.random() * CHOSUNG.length)] + CHOSUNG[Math.floor(Math.random() * CHOSUNG.length)]
+  } while (c === prev)
+  return c
+}
+
 function pendingFor(room, playerId, pos) {
   const cell = cellAt(roomCells(room), roomBridge(room), pos)
-  const kind = cell.type || 'normal'
+  return makePending(room, playerId, pos, cell.type || 'normal')
+}
+// kind 별 대기 상태 만들기 (게임 선택권에서 고른 게임에도 사용)
+function makePending(room, playerId, pos, kind, title) {
   const p = { kind, playerId, pos }
+  if (title) p.title = title
   if (kind === 'balance') p.topic = pickTopic(room)
   if (kind === 'liar') p.stage = 'category' // category → reveal → vote → result
+  if (kind === 'hunmin') p.chosung = pickChosung()
+  if (kind === 'vote') p.stage = 'vote' // vote → result
+  if (kind === 'choose') p.stage = 'choose'
   if (kind === 'aiPick') {
     // 방에 있는 사람(이름 있는 참가자) 중 아무나 한 명
     const ids = Object.keys(room.players || {}).filter((id) => room.players[id]?.name)
@@ -356,16 +387,17 @@ export async function resolvePending(code, room, action, target) {
   const p = room.pending
   if (!p) return
 
-  // AI 지목: 지목된 사람이 놉카드로 거부할 수 있음 (행동 주체가 아니어도)
-  if (p.kind === 'aiPick' && action === 'target-nop') {
-    const tid = DEMO ? p.target : myId()
-    if (tid !== p.target) return
+  // AI 지목 / 다수결 지목: 지목된 사람이 놉카드로 거부할 수 있음 (행동 주체가 아니어도)
+  if (action === 'target-nop' && (p.kind === 'aiPick' || (p.kind === 'vote' && p.stage === 'result'))) {
+    const targets = p.kind === 'aiPick' ? [p.target] : voteWinners(p)
+    const tid = DEMO ? targets[0] : myId()
+    if (!targets.includes(tid)) return
     const t = room.players[tid]
     if (!t || (t.nop || 0) <= 0) return
     await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${tid}/nop`]: t.nop - 1,
-      event: { id: newId(), text: `${t.name} 놉카드 사용! AI 지목 거부 🙅` },
+      event: { id: newId(), text: `${t.name} 놉카드 사용! ${p.kind === 'aiPick' ? 'AI 지목' : '다수결 지목'} 거부 🙅` },
     })
     return
   }
@@ -381,6 +413,7 @@ export async function resolvePending(code, room, action, target) {
   if (action === 'nop-use') {
     if (p.kind === 'option' || p.kind === 'release') return // 옵션은 놉카드로 거부 불가
     if (p.kind === 'liar' && p.stage !== 'category') return // 라이어 게임은 시작 전에만 거부 가능
+    if (p.kind === 'vote' || p.kind === 'choose') return
     await roomUpdate(code, {
       ...nextTurnUpdates(room),
       [`players/${id}/nop`]: Math.max(0, (me.nop || 0) - 1),
@@ -471,6 +504,38 @@ export async function resolvePending(code, room, action, target) {
       })
       return
     }
+    case 'choose': {
+      // 게임 선택권: 'choose' + target(balance|liar|hunmin) → 그 게임으로 전환
+      const titles = { balance: '밸런스 게임', liar: '라이어 게임', hunmin: '훈민정음 게임' }
+      if (action === 'choose' && titles[target]) {
+        const np = makePending(room, id, p.pos, target, titles[target])
+        await roomUpdate(code, withTopicUpdates(room, np, { pending: np, event: { id: newId(), text: `${me.name} 🎁 ${titles[target]} 선택!` } }))
+      }
+      return
+    }
+    case 'vote': {
+      // 다수결 지목: 행동자가 결과 공개 → 카운트다운 후 최다 득표자 공개
+      if (action === 'result' && Object.keys(p.votes || {}).length > 0) {
+        await roomUpdate(code, { 'pending/stage': 'result', 'pending/revealedAt': Date.now() })
+        return
+      }
+      if (action === 'done' && p.stage === 'result') {
+        const winners = voteWinners(p)
+        await roomUpdate(code, {
+          ...nextTurnUpdates(room),
+          event: { id: newId(), text: `🗳️ 다수결 지목 → ${winners.map((w) => room.players[w]?.name).join(', ')} 마셔! 🍶` },
+        })
+      }
+      return
+    }
+    case 'hunmin': {
+      if (action === 'reroll') {
+        await roomUpdate(code, { 'pending/chosung': pickChosung(p.chosung) })
+        return
+      }
+      await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text: `${me.name} 훈민정음 (${p.chosung}) 수행 ✅` } })
+      return
+    }
     case 'liar': {
       // 'category' + target(카테고리 key): 단어 배정 → 확인 단계
       if (action === 'category' && target) {
@@ -496,7 +561,7 @@ export async function resolvePending(code, room, action, target) {
       if (action === 'done' && p.stage === 'result') {
         await roomUpdate(code, {
           ...nextTurnUpdates(room),
-          event: { id: newId(), text: `🤥 라이어는 ${room.players[p.liar]?.name} (${p.majority} / ${p.minority})` },
+          event: { id: newId(), text: `🤥 라이어 게임 결과: 다른 키워드는 ${room.players[p.liar]?.name}` },
         })
         return
       }
@@ -598,4 +663,26 @@ export function liarResult(room, p) {
   const unique = top && (!sorted[1] || sorted[1][1] < top[1])
   const caught = !!(unique && top[0] === p.liar)
   return { tally, top: top?.[0] || null, tie: !!(top && !unique), caught }
+}
+
+// ---------- 다수결 지목 ----------
+export async function castVote(code, room, target) {
+  const p = room.pending
+  if (!p || p.kind !== 'vote' || p.stage !== 'vote' || !target) return
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const id = DEMO ? ids.find((pid) => !p.votes?.[pid]) : myId()
+  if (!id || !ids.includes(id)) return
+  await roomUpdate(code, { [`pending/votes/${id}`]: target })
+}
+// 최다 득표자(들)
+export function voteWinners(p) {
+  const tally = {}
+  Object.values(p.votes || {}).forEach((t) => (tally[t] = (tally[t] || 0) + 1))
+  const max = Math.max(0, ...Object.values(tally))
+  return Object.keys(tally).filter((k) => tally[k] === max)
+}
+export function voteTally(p) {
+  const tally = {}
+  Object.values(p.votes || {}).forEach((t) => (tally[t] = (tally[t] || 0) + 1))
+  return tally
 }

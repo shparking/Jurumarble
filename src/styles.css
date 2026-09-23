@@ -1641,3 +1641,30 @@ input {
 .tally-row.liar .pname {
   color: var(--orange);
 }
+
+/* 축하 화면 여러 명 */
+.ai-avatars {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* 훈민정음 초성 */
+.chosung {
+  margin: 14px 0 10px;
+  padding: 22px 16px;
+  border-radius: 20px;
+  background: var(--orange-soft);
+  border: 2px solid var(--orange);
+  text-align: center;
+  font-size: 64px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: var(--text);
+}
+/* 강퇴 버튼 */
+.order-btns .kick {
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
