@@ -49,10 +49,13 @@ import {
   missionReveal,
   missionResult,
   missionDone,
+  giveNop,
+  missionAck,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
 import { autoEmoji } from './game/emoji'
+import { beep, ding, boom, tick as tickSound } from './sound'
 import { LIAR_CATEGORIES, liarCategory } from './game/liar'
 import { DEFAULT_CELLS, DEFAULT_BRIDGE } from './game/board'
 
@@ -156,7 +159,9 @@ function useCountdown(key) {
     }
   }, [key])
   useEffect(() => {
+    if (step > 0) beep(step)
     if (step === 0) {
+      ding()
       try {
         navigator.vibrate?.([80, 40, 80, 40, 200])
       } catch {}
@@ -590,12 +595,19 @@ function BombPanel({ room, pending: p, iAct, code }) {
   useEffect(() => {
     if (exploded && !bombRef.current) {
       bombRef.current = true
+      boom()
       try {
         navigator.vibrate?.([300, 100, 300, 100, 600])
       } catch {}
     }
     if (!exploded) bombRef.current = false
   }, [exploded])
+  // 째깍 소리 (1초마다)
+  useEffect(() => {
+    if (p.stage !== 'ticking' || exploded) return
+    const t = setInterval(tickSound, 1000)
+    return () => clearInterval(t)
+  }, [p.stage, exploded])
   const actor = room.players[p.playerId]
   if (p.stage === 'ticking') {
     return (
@@ -979,7 +991,7 @@ function MissionBanner({ room, me }) {
       <div className={`timer mission ${left < 30000 ? 'soon' : ''}`} onClick={() => mine && setShow((v) => !v)} role={mine ? 'button' : undefined}>
         <div className="timer-bar" style={{ width: `${pct}%` }} />
         <span className="timer-text">🎯 {mine ? (show ? m.detail : '내 돌발 미션 · 탭해서 보기') : '누군가에게 돌발 미션이 주어졌습니다!'}</span>
-        <span className="timer-who">{mine ? (show ? '탭해서 숨기기' : '🤫') : '???'}</span>
+        <span className="timer-who">{mine ? (show ? '탭해서 숨기기' : '🤫') : `확인 ${Object.keys(m.acks || {}).length}/${Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name).length}`}</span>
         <span className="timer-time">
           {mm}:{ss}
         </span>
@@ -988,21 +1000,40 @@ function MissionBanner({ room, me }) {
   )
 }
 
-// 돌발 미션: 수행자에게 처음 한 번 크게 알림
-function MissionCard({ room, me, onClose }) {
+// 돌발 미션: 시작 시 전원 팝업 (수행자는 미션 내용, 나머지는 안내) + 확인 인원 표시
+function MissionCard({ room, me, code, onClose }) {
   const m = room.mission
-  if (!m || m.stage !== 'active' || !(DEMO || m.playerId === me)) return null
+  if (!m || m.stage !== 'active') return null
+  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
+  const acked = ids.filter((pid) => m.acks?.[pid])
+  const mine = DEMO || m.playerId === me
+  const done = () => {
+    missionAck(code, room)
+    onClose()
+  }
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="kicker">🤫 당신에게 돌발 미션!</div>
-        <h2>{m.detail}</h2>
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div className="kicker">{mine ? '🤫 당신에게 돌발 미션!' : '🎯 돌발 미션!'}</div>
+        <h2>{mine ? m.detail : '누군가에게 돌발 미션이 주어졌습니다!'}</h2>
         <div className="muted">
-          {m.minutes}분 안에 아무도 눈치 못 채게 수행하세요. 시간이 끝나면 다른 사람들이 어떤 미션이었는지 5지선다로 맞혀요. 절반 이상이 맞히면 당신이, 못 맞히면 틀린 사람들이 마셔요.
+          {mine
+            ? `${m.minutes}분 안에 아무도 눈치 못 채게 수행하세요. 시간이 끝나면 다른 사람들이 어떤 미션이었는지 5지선다로 맞혀요. 절반 이상이 맞히면 당신이, 못 맞히면 틀린 사람들이 마셔요.`
+            : `${m.minutes}분 동안 누가 이상한 행동을 하는지 잘 관찰하세요 👀 시간이 끝나면 그 사람이 공개되고, 어떤 미션이었는지 5지선다로 맞히는 투표가 열려요. 절반 이상이 맞히면 그 사람이, 못 맞히면 틀린 사람들이 마셔요.`}
+        </div>
+        <div className="ack-row">
+          <span className="muted">확인 {acked.length}/{ids.length}</span>
+          <span className="ack-avatars">
+            {ids.map((pid) => (
+              <span key={pid} className={`avatar sm ${m.acks?.[pid] ? '' : 'dim'}`} style={{ background: room.players[pid].color }} title={room.players[pid].name}>
+                {room.players[pid].name.slice(0, 1)}
+              </span>
+            ))}
+          </span>
         </div>
         <div className="actions">
-          <button className="btn btn-primary" onClick={onClose}>
-            알겠어요, 시작!
+          <button className="btn btn-primary" onClick={done}>
+            {mine ? '알겠어요, 시작!' : '확인했어요'}
           </button>
         </div>
       </div>
@@ -1240,6 +1271,7 @@ export default function App() {
   const [showLog, setShowLog] = useState(false)
   const [missionSeen, setMissionSeen] = useState(null) // 수행자가 확인한 미션 id
   const [nopConfirm, setNopConfirm] = useState(null) // 놉카드 사용 확인 중인 참가자 id
+  const [nopGive, setNopGive] = useState(false) // 양도 대상 선택 중
   const missionRef = useRef(null)
   const [editing, setEditing] = useState(null) // { pos, cell, text }
   const [rolling, setRolling] = useState(false)
@@ -1381,14 +1413,9 @@ export default function App() {
     const m = room?.mission
     if (!m || m.stage !== 'active' || missionRef.current === m.id) return
     missionRef.current = m.id
-    if (DEMO || m.playerId !== me) {
-      setToast('🎯 누군가에게 돌발 미션이 주어졌습니다!')
-      setTimeout(() => setToast(null), 2500)
-    } else {
-      try {
-        navigator.vibrate?.([60, 40, 60, 40, 60])
-      } catch {}
-    }
+    try {
+      navigator.vibrate?.(m.playerId === me ? [60, 40, 60, 40, 60] : [80, 60, 80])
+    } catch {}
   }, [room?.mission?.id, room?.mission?.stage])
   useEffect(() => {
     if (!room || room.hostId !== me || room.mission?.stage !== 'active') return
@@ -1737,7 +1764,12 @@ export default function App() {
                     <span className="pname">{p.name}</span>
                     <button
                       className={`nop-badge ${(p.nop || 0) === 0 ? 'empty' : ''}`}
-                      onClick={() => mine && (p.nop || 0) > 0 && setNopConfirm(pid)}
+                      onClick={() => {
+                        if (mine && (p.nop || 0) > 0) {
+                          setNopGive(false)
+                          setNopConfirm(pid)
+                        }
+                      }}
                       disabled={!mine || (p.nop || 0) === 0}
                       title={mine ? '내 놉카드 사용' : '놉카드 보유 수'}
                     >
@@ -1784,7 +1816,7 @@ export default function App() {
 
       {/* ---------- 돌발 미션 ---------- */}
       {room && room.status === 'playing' && room.mission?.stage === 'active' && missionSeen !== room.mission.id && !showPending && (
-        <MissionCard room={room} me={me} onClose={() => setMissionSeen(room.mission.id)} />
+        <MissionCard room={room} me={me} code={code} onClose={() => setMissionSeen(room.mission.id)} />
       )}
       {room && room.status === 'playing' && !showPending && <MissionQuiz room={room} me={me} code={code} />}
 
@@ -1922,31 +1954,71 @@ export default function App() {
         </div>
       )}
 
-      {/* ---------- 놉카드 사용 확인 ---------- */}
+      {/* ---------- 놉카드 사용 / 양도 ---------- */}
       {nopConfirm && room?.players?.[nopConfirm] && (DEMO || nopConfirm === me) && (
         <div className="modal-backdrop" onClick={() => setNopConfirm(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="kicker">🎫 놉카드</div>
-            <h2>
-              내 놉카드를 사용하시겠습니까?
-            </h2>
-            <div className="muted">
-              <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b> · 보유 {room.players[nopConfirm].nop || 0}장 → {Math.max(0, (room.players[nopConfirm].nop || 0) - 1)}장. 사용하면 모두에게 알림이 떠요.
-            </div>
-            <div className="actions">
-              <button className="btn btn-ghost" onClick={() => setNopConfirm(null)}>
-                아니요
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  useNopAnytime(code, room, nopConfirm)
-                  setNopConfirm(null)
-                }}
-              >
-                예, 사용
-              </button>
-            </div>
+            {nopGive ? (
+              <>
+                <h2>누구에게 양도할까요?</h2>
+                <div className="muted">
+                  <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b>의 놉카드 1장을 넘겨요. 넘기면 모두에게 알림이 떠요.
+                </div>
+                <div className="steal-list">
+                  {Object.entries(room.players)
+                    .filter(([pid, pl]) => pid !== nopConfirm && pl.name)
+                    .map(([pid, pl]) => (
+                      <button
+                        key={pid}
+                        className="steal-btn"
+                        onClick={() => {
+                          giveNop(code, room, pid, nopConfirm)
+                          setNopConfirm(null)
+                          setNopGive(false)
+                        }}
+                      >
+                        <span className="avatar sm" style={{ background: pl.color }}>
+                          {pl.name.slice(0, 1)}
+                        </span>
+                        <span className="pname">{pl.name}</span>
+                        <span className={`nop-badge ${(pl.nop || 0) === 0 ? 'empty' : ''}`}>
+                          <NopIcon /> {pl.nop || 0}
+                        </span>
+                      </button>
+                    ))}
+                </div>
+                <div className="actions">
+                  <button className="btn btn-ghost" onClick={() => setNopGive(false)}>
+                    뒤로
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2>내 놉카드, 어떻게 할까요?</h2>
+                <div className="muted">
+                  <b style={{ color: room.players[nopConfirm].color }}>{room.players[nopConfirm].name}</b> · 보유 {room.players[nopConfirm].nop || 0}장. 사용하면 벌칙을 거부하고, 양도하면 다른 사람에게 1장을 넘겨요. 둘 다 모두에게 알림이 떠요.
+                </div>
+                <div className="actions">
+                  <button className="btn btn-ghost" onClick={() => setNopConfirm(null)}>
+                    취소
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setNopGive(true)}>
+                    🎁 양도
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      useNopAnytime(code, room, nopConfirm)
+                      setNopConfirm(null)
+                    }}
+                  >
+                    🙅 사용
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

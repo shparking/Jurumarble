@@ -1995,3 +1995,20 @@ input {
 .timer.proxy .timer-text {
   white-space: normal;
 }
+
+/* 돌발 미션 확인 인원 */
+.ack-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.ack-avatars {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.avatar.dim {
+  opacity: 0.25;
+  filter: grayscale(1);
+}

@@ -106,6 +106,9 @@ export async function createRoom(name, layout = 'landscape') {
     demoSeed(code, ['관희', '윤정', '민수'], COLORS)
     // 데모: ?demo=1&start=30 처럼 시작 칸 지정 (특정 칸 테스트용)
     const st = parseInt(new URLSearchParams(window.location.search).get('start'), 10)
+    // 데모: &nop=2 처럼 내 놉카드 수 지정
+    const myNop = parseInt(new URLSearchParams(window.location.search).get('nop'), 10)
+    if (myNop >= 0) await dbUpdate(roomPath(code), { [`players/${id}/nop`]: myNop })
     if (!isNaN(st)) await roomUpdate(code, { pos: { track: 'main', idx: ((st % MAIN_COUNT) + MAIN_COUNT) % MAIN_COUNT } })
     // 데모: &opt=m12,m29 처럼 진행 중인 옵션 타이머를 미리 만들어 둠
     const opt = new URLSearchParams(window.location.search).get('opt')
@@ -956,4 +959,25 @@ export function reactionRanking(room, p) {
     return { pid, v, label: `${(v / 1000).toFixed(3)}초` }
   })
   return rows.sort((a, b) => a.v - b.v)
+}
+
+// 놉카드 양도: 내 카드 1장을 다른 사람에게 (본인만)
+export async function giveNop(code, room, toId, fromId) {
+  const id = DEMO ? fromId || myId() : myId()
+  const from = room.players?.[id]
+  const to = room.players?.[toId]
+  if (!from || !to || toId === id || (from.nop || 0) <= 0) return
+  await roomUpdate(code, {
+    [`players/${id}/nop`]: from.nop - 1,
+    [`players/${toId}/nop`]: (to.nop || 0) + 1,
+    event: { id: newId(), text: `🎫 ${from.name}님이 ${to.name}님에게 놉카드 1장을 양도했습니다!` },
+  })
+}
+// 돌발 미션 알림 확인 (전원)
+export async function missionAck(code, room) {
+  const m = room.mission
+  if (!m || m.stage !== 'active') return
+  const id = DEMO ? Object.keys(room.players || {}).find((pid) => room.players[pid]?.name && !m.acks?.[pid]) : myId()
+  if (!id || !room.players?.[id]) return
+  await roomUpdate(code, { [`mission/acks/${id}`]: true })
 }
