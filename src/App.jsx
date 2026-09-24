@@ -991,7 +991,7 @@ function MissionBanner({ room, me }) {
       <div className={`timer mission ${left < 30000 ? 'soon' : ''}`} onClick={() => mine && setShow((v) => !v)} role={mine ? 'button' : undefined}>
         <div className="timer-bar" style={{ width: `${pct}%` }} />
         <span className="timer-text">🎯 {mine ? (show ? m.detail : '내 돌발 미션 · 탭해서 보기') : '누군가에게 돌발 미션이 주어졌습니다!'}</span>
-        <span className="timer-who">{mine ? (show ? '탭해서 숨기기' : '🤫') : `확인 ${Object.keys(m.acks || {}).length}/${Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name).length}`}</span>
+        <span className="timer-who">{mine ? (show ? '탭해서 숨기기' : '🤫') : '???'}</span>
         <span className="timer-time">
           {mm}:{ss}
         </span>
@@ -1004,8 +1004,6 @@ function MissionBanner({ room, me }) {
 function MissionCard({ room, me, code, onClose }) {
   const m = room.mission
   if (!m || m.stage !== 'active') return null
-  const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
-  const acked = ids.filter((pid) => m.acks?.[pid])
   const mine = DEMO || m.playerId === me
   const done = () => {
     missionAck(code, room)
@@ -1020,16 +1018,6 @@ function MissionCard({ room, me, code, onClose }) {
           {mine
             ? `${m.minutes}분 안에 아무도 눈치 못 채게 수행하세요. 시간이 끝나면 다른 사람들이 어떤 미션이었는지 5지선다로 맞혀요. 절반 이상이 맞히면 당신이, 못 맞히면 틀린 사람들이 마셔요.`
             : `${m.minutes}분 동안 누가 이상한 행동을 하는지 잘 관찰하세요 👀 시간이 끝나면 그 사람이 공개되고, 어떤 미션이었는지 5지선다로 맞히는 투표가 열려요. 절반 이상이 맞히면 그 사람이, 못 맞히면 틀린 사람들이 마셔요.`}
-        </div>
-        <div className="ack-row">
-          <span className="muted">확인 {acked.length}/{ids.length}</span>
-          <span className="ack-avatars">
-            {ids.map((pid) => (
-              <span key={pid} className={`avatar sm ${m.acks?.[pid] ? '' : 'dim'}`} style={{ background: room.players[pid].color }} title={room.players[pid].name}>
-                {room.players[pid].name.slice(0, 1)}
-              </span>
-            ))}
-          </span>
         </div>
         <div className="actions">
           <button className="btn btn-primary" onClick={done}>
