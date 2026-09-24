@@ -73,7 +73,7 @@ npm run build    # dist/ 배포용 (Firebase Hosting, Vercel, Netlify 등 아무
   - 상단 ≡ 버튼: 게임 로그 팝업(주사위 결과, 카드 수행, 놉카드, 옵션, 라이어 결과 등 최근 80개)
 
 ## 효과음
-`src/sound.js` — 카운트다운 삐·삐·삐, 공개 띵, 폭탄 째깍/폭발음을 Web Audio 로 합성. 끄려면 `SOUND_ENABLED = false`.
+`src/sound.js` — 카운트다운 삐·삐·삐, 공개 띵, 폭탄 째깍/폭발음을 Web Audio 로 합성. 현재 꺼져 있음(`SOUND_ENABLED = false`). 켜려면 `true`.
 
 ## 구조
 - `src/firebase.js` Firebase 초기화 · `src/room.js` 방/게임 진행 로직(DB 읽기·쓰기)

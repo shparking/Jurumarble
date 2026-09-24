@@ -1,5 +1,5 @@
 // 효과음 (Web Audio, 파일 없이 합성). 마음에 안 들면 SOUND_ENABLED 를 false 로 바꾸면 전부 꺼짐.
-export const SOUND_ENABLED = true
+export const SOUND_ENABLED = false
 
 let ctx = null
 function getCtx() {
