@@ -1,5 +1,5 @@
 // 데이터 저장소 추상화: 기본은 Firebase, `?demo` 로 열면 브라우저 메모리(한 기기 미리보기용)
-import { ref, set, get, update, onValue, onDisconnect, remove, serverTimestamp, query, orderByChild, endAt, limitToFirst } from 'firebase/database'
+import { ref, set, get, update, onValue, onDisconnect, remove, serverTimestamp } from 'firebase/database'
 
 export const DEMO = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo')
 
@@ -102,27 +102,44 @@ export function demoSeed(code, names, colors) {
   names.forEach((n, i) => memSet(`rooms/${code}/players/demo${i}`, { name: n, color: colors[(i + 1) % colors.length], nop: i === 1 ? 2 : 0, joinedAt: Date.now() }))
 }
 
-// 방 정리 (방 만들 때 / 앱 열 때 호출)
+// 방 정리 (방 만들 때 / 앱 열 때 호출) — 인덱스 없이 rooms 전체를 읽어 판단
+//  - 참가자가 없거나, 모두 접속이 끊긴 채 10분 넘게 활동이 없는 방 삭제
 //  - 대기실(lobby)에서 1시간 넘게 시작 안 한 방 삭제
 //  - 상태와 무관하게 24시간 지난 방 삭제
-// ※ 규칙에 ".indexOn": ["createdAt"] 가 있어야 동작 (없으면 조용히 실패)
 export const LOBBY_TTL_MS = 60 * 60 * 1000
 export const ROOM_TTL_MS = 24 * 60 * 60 * 1000
-export async function dbPurgeOldRooms(limit = 30) {
+export const EMPTY_TTL_MS = 10 * 60 * 1000
+export function shouldPurge(r, nowMs) {
+  if (!r || typeof r !== 'object') return true
+  const created = typeof r.createdAt === 'number' ? r.createdAt : 0
+  const players = Object.values(r.players || {}).filter((p) => p && p.name)
+  const lastActive = typeof r.lastActive === 'number' ? r.lastActive : created
+  if (players.length === 0) return true
+  if (players.every((p) => p.online === false) && lastActive <= nowMs - EMPTY_TTL_MS) return true
+  if (r.status !== 'playing' && created <= nowMs - LOBBY_TTL_MS) return true
+  if (created <= nowMs - ROOM_TTL_MS) return true
+  return false
+}
+export async function dbPurgeOldRooms() {
   if (DEMO) return 0
-  const nowMs = Date.now()
-  const q = query(ref(fbDb, 'rooms'), orderByChild('createdAt'), endAt(nowMs - LOBBY_TTL_MS), limitToFirst(limit))
-  const snap = await get(q)
+  const snap = await get(ref(fbDb, 'rooms'))
   if (!snap.exists()) return 0
+  const nowMs = Date.now()
   const updates = {}
   snap.forEach((child) => {
-    const r = child.val() || {}
-    const created = typeof r.createdAt === 'number' ? r.createdAt : 0
-    const stale = created <= nowMs - ROOM_TTL_MS
-    const neverStarted = r.status !== 'playing'
-    if (stale || neverStarted) updates[child.key] = null
+    if (shouldPurge(child.val(), nowMs)) updates[child.key] = null
   })
   if (!Object.keys(updates).length) return 0
   await update(ref(fbDb, 'rooms'), updates)
   return Object.keys(updates).length
+}
+// 홈 화면 방 목록 구독 (rooms 전체 → 요약)
+export function dbOnRooms(cb) {
+  if (DEMO) {
+    const fn = () => cb(memGet('rooms') || {})
+    mem.subs.add(fn)
+    fn()
+    return () => mem.subs.delete(fn)
+  }
+  return onValue(ref(fbDb, 'rooms'), (snap) => cb(snap.exists() ? snap.val() : {}))
 }

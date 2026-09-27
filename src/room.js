@@ -8,7 +8,7 @@
 //   event: { id, text },                                       // 토스트로 띄울 최근 이벤트
 //   cells: { [idx]: text }, bridgeCells: { [idx]: text }       // 방장이 편집한 칸 텍스트
 // }
-import { dbGet, dbSet, dbUpdate, dbRemove, dbOn, dbOnConnected, dbPresence, now, DEMO, demoSeed, dbPurgeOldRooms, dbWatchServerOffset, serverNow } from './db'
+import { dbGet, dbSet, dbUpdate, dbRemove, dbOn, dbOnConnected, dbPresence, now, DEMO, demoSeed, dbPurgeOldRooms, dbWatchServerOffset, serverNow, dbOnRooms, shouldPurge } from './db'
 import './firebase'
 import { DEFAULT_CELLS, DEFAULT_BRIDGE, LAYOUTS, MAIN_COUNT, computePath, cellAt, cellsForLayout } from './game/board'
 import { BALANCE_TOPICS } from './game/balance'
@@ -57,6 +57,7 @@ const roomPath = (code) => `rooms/${code}`
 // 방 상태 갱신 + event 가 있으면 게임 로그(log/{id})에도 같이 기록
 export const LOG_MAX = 80
 function roomUpdate(code, updates) {
+  updates.lastActive = Date.now()
   const ev = updates.event
   if (ev && ev.id && ev.text) updates[`log/${ev.id}`] = { t: Date.now(), text: String(ev.text).replace(/\n/g, ' ') }
   return dbUpdate(roomPath(code), updates)
@@ -83,20 +84,24 @@ export function purgeRooms() {
   return dbPurgeOldRooms().catch(() => 0)
 }
 
-export async function createRoom(name, layout = 'landscape') {
+export async function createRoom(name, layout = 'landscape', password = '') {
   const id = myId()
-  // 오래된/시작 안 한 방 정리 (실패해도 방 만들기는 계속)
+  // 오래된/빈 방 정리 (실패해도 방 만들기는 계속)
   purgeRooms()
   let code = randomCode()
   for (let tries = 0; tries < 5; tries++) {
     if ((await dbGet(roomPath(code))) == null) break
     code = randomCode()
   }
+  const pw = String(password || '').trim()
   await dbSet(roomPath(code), {
     hostId: id,
+    hostName: name,
     createdAt: now(),
+    lastActive: Date.now(),
     status: 'lobby',
     layout,
+    ...(pw ? { pw } : {}),
     players: { [id]: { name, color: COLORS[0], nop: 0, joinedAt: now() } },
     pos: { track: 'main', idx: 0 },
     turn: 0,
@@ -124,7 +129,7 @@ export async function createRoom(name, layout = 'landscape') {
   return code
 }
 
-export async function joinRoom(code, name) {
+export async function joinRoom(code, name, password = '') {
   code = code.trim().toUpperCase()
   const room = await dbGet(roomPath(code))
   if (room == null) throw new Error('그런 방이 없어요. 코드를 다시 확인해주세요.')
@@ -133,6 +138,11 @@ export async function joinRoom(code, name) {
   if (room.kicked?.[id]) throw new Error('방장이 이 방에서 내보낸 참가자예요.')
   if (!players[id]?.name) {
     if (room.status !== 'lobby') throw new Error('이미 시작된 게임이에요.')
+    if (room.pw && room.pw !== String(password || '').trim()) {
+      const err = new Error(password ? '비밀번호가 틀렸어요.' : '비밀번호가 필요한 방이에요.')
+      err.needPassword = true
+      throw err
+    }
     if (Object.keys(players).length >= 10) throw new Error('방이 가득 찼어요 (최대 10명).')
     const used = new Set(Object.values(players).map((p) => p.color))
     const color = COLORS.find((c) => !used.has(c)) || COLORS[Object.keys(players).length % COLORS.length]
@@ -980,4 +990,28 @@ export async function missionAck(code, room) {
   const id = DEMO ? Object.keys(room.players || {}).find((pid) => room.players[pid]?.name && !m.acks?.[pid]) : myId()
   if (!id || !room.players?.[id]) return
   await roomUpdate(code, { [`mission/acks/${id}`]: true })
+}
+
+// ---------- 홈 화면 방 목록 ----------
+export function subscribeRoomList(cb) {
+  return dbOnRooms((all) => {
+    const nowMs = Date.now()
+    const list = Object.entries(all || {})
+      .filter(([, r]) => r && typeof r === 'object' && !shouldPurge(r, nowMs))
+      .map(([code, r]) => {
+        const players = Object.values(r.players || {}).filter((p) => p && p.name)
+        return {
+          code,
+          hostName: r.hostName || r.players?.[r.hostId]?.name || '',
+          count: players.length,
+          online: players.filter((p) => p.online !== false).length,
+          locked: !!r.pw,
+          status: r.status,
+          createdAt: typeof r.createdAt === 'number' ? r.createdAt : 0,
+          members: Object.keys(r.players || {}),
+        }
+      })
+      .sort((a, b) => b.createdAt - a.createdAt)
+    cb(list)
+  })
 }

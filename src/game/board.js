@@ -23,7 +23,7 @@ export const DEFAULT_CELLS = [
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 10, emoji: '🎁', text: '게임 선택권', type: 'choose' },
   { id: 11, emoji: '🍶', text: '박상혁만 마셔!' },
-  { id: 12, emoji: '⚙️', text: '영어금지', type: 'option', minutes: 10 },
+  { id: 12, emoji: '⚙️', text: '영어금지', type: 'option', minutes: 5 },
   { id: 13, emoji: '🤥', text: '라이어 게임', type: 'liar' },
   { id: 14, emoji: '🔓', text: '옵션 해제', type: 'release' },
   { id: 15, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
@@ -40,7 +40,7 @@ export const DEFAULT_CELLS = [
   { id: 26, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 27, emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
   { id: 28, emoji: '🍶', text: '박상혁빼고\n다 마셔!' },
-  { id: 29, emoji: '⚙️', text: '투터치', type: 'option', minutes: 10 },
+  { id: 29, emoji: '⚙️', text: '투터치', type: 'option', minutes: 5 },
   { id: 30, emoji: '🗳️', text: '다수결 지목\n너 마셔!', type: 'vote' },
   { id: 31, emoji: '⚖️', text: '밸런스 게임', type: 'balance' },
 ]
@@ -49,9 +49,9 @@ export const DEFAULT_CELLS = [
 export const DEFAULT_BRIDGE = [
   { id: 'b0', emoji: '🚗', text: '대리 기사', type: 'proxy' },
   { id: 'b1', emoji: '🎫', text: '놉카드 +1', type: 'nop' },
-  { id: 'b2', emoji: '⚙️', text: '연대책임', type: 'option', minutes: 10, pair: true },
+  { id: 'b2', emoji: '⚙️', text: '연대책임', type: 'option', minutes: 5, pair: true },
   { id: 'b3', emoji: '🔮', text: '텔레파시 게임' },
-  { id: 'b4', emoji: '⚙️', text: '아니·근데·진짜\n금지', type: 'option', minutes: 5 },
+  { id: 'b4', emoji: '⚙️', text: '아니·근데·진짜\n금지', type: 'option', minutes: 3 },
   { id: 'b5', emoji: '😈', text: '놉카드 내놔!', type: 'steal' },
 ]
 

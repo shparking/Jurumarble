@@ -51,6 +51,7 @@ import {
   missionDone,
   giveNop,
   missionAck,
+  subscribeRoomList,
 } from './room'
 import { BALANCE_TOPICS } from './game/balance'
 import { DEFAULT_CHARACTER } from './game/characters'
@@ -1260,6 +1261,10 @@ export default function App() {
   const [missionSeen, setMissionSeen] = useState(null) // 수행자가 확인한 미션 id
   const [nopConfirm, setNopConfirm] = useState(null) // 놉카드 사용 확인 중인 참가자 id
   const [nopGive, setNopGive] = useState(false) // 양도 대상 선택 중
+  const [pwInput, setPwInput] = useState('') // 방 만들 때 비밀번호(선택)
+  const [roomList, setRoomList] = useState([]) // 홈 화면 방 목록
+  const [joinTarget, setJoinTarget] = useState(null) // 비밀번호 입력 중인 방 {code}
+  const [pwJoin, setPwJoin] = useState('')
   const missionRef = useRef(null)
   const [editing, setEditing] = useState(null) // { pos, cell, text }
   const [rolling, setRolling] = useState(false)
@@ -1275,6 +1280,12 @@ export default function App() {
     if (connected) purgeRooms()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected])
+
+  // 홈 화면: 열린 방 목록 구독
+  useEffect(() => {
+    if (code || !connected) return
+    return subscribeRoomList(setRoomList)
+  }, [code, connected])
 
   // 방 구독
   useEffect(() => {
@@ -1309,11 +1320,20 @@ export default function App() {
   }, [code, joined])
 
   // 링크로 들어왔는데 아직 참가 전이면 자동 참가 시도 (이름이 있을 때)
+  const leavingRef = useRef(false)
   useEffect(() => {
     if (room && !room.players?.[me]?.name) {
+      if (leavingRef.current) return // 내가 나가는 중이면 자동 재참가 금지
       if (room.kicked?.[me]) {
         setCode('')
         setError('방장이 방에서 내보냈어요.')
+        return
+      }
+      if (room.pw && room.status === 'lobby') {
+        // 비밀번호 방: 링크로 들어와도 비밀번호를 물어봄
+        setCode('')
+        setJoinTarget({ code })
+        setPwJoin('')
         return
       }
       if (name.trim() && room.status === 'lobby') {
@@ -1455,14 +1475,50 @@ export default function App() {
     }
     setBusyBtn(false)
   }
-  const onCreate = () => enter(() => createRoom(name.trim()))
+  const onCreate = () =>
+    enter(async () => {
+      const c = await createRoom(name.trim(), 'landscape', pwInput)
+      setPwInput('')
+      return c
+    })
+  const tryJoin = async (c, pw) => {
+    if (!name.trim()) return setError('이름을 먼저 입력해주세요.')
+    setBusyBtn(true)
+    setError('')
+    try {
+      const got = await joinRoom(c, name.trim(), pw)
+      setJoinTarget(null)
+      setPwJoin('')
+      setCode(got)
+    } catch (e) {
+      if (e.needPassword) {
+        setJoinTarget({ code: c.trim().toUpperCase(), error: pw ? e.message : '' })
+      } else {
+        setJoinTarget(null)
+        setError(e.message || '실패했어요. 다시 시도해주세요.')
+      }
+    }
+    setBusyBtn(false)
+  }
   const onJoin = () => {
     if (codeInput.trim().length < 4) return setError('방 코드 4자리를 입력해주세요.')
-    return enter(() => joinRoom(codeInput, name.trim()))
+    return tryJoin(codeInput, '')
+  }
+  const onPickRoom = (r) => {
+    if (r.status !== 'lobby' && !r.members.includes(me)) return setError('이미 시작된 게임이에요.')
+    if (r.locked && !r.members.includes(me)) {
+      setPwJoin('')
+      setJoinTarget({ code: r.code })
+      return
+    }
+    return tryJoin(r.code, '')
   }
   const onLeave = async () => {
+    leavingRef.current = true
     if (room) await leaveRoom(code)
     setCode('')
+    setRoom(null)
+    setTimeout(() => (leavingRef.current = false), 1500)
     try {
       sessionStorage.removeItem('room')
     } catch {}
@@ -1559,7 +1615,7 @@ export default function App() {
             <h1>
               <span className="hero-emo" aria-hidden>🍺</span>주루마블<span className="hero-emo" aria-hidden>🎲</span>
             </h1>
-            <p>이름을 정하고 방을 만들거나, 친구가 준 코드로 들어가세요.</p>
+            <p>이름을 정하고 방을 만들거나, 아래 목록에서 친구 방에 들어가세요.</p>
           </div>
 
           <div className="card card-pad stack">
@@ -1567,11 +1623,15 @@ export default function App() {
               <div className="label">내 이름</div>
               <input className="field" placeholder="예) 상혁" value={name} maxLength={10} onChange={(e) => saveName(e.target.value)} />
             </div>
+            <div>
+              <div className="label">방 비밀번호 (선택)</div>
+              <input className="field" placeholder="비워두면 누구나 입장" value={pwInput} maxLength={12} onChange={(e) => setPwInput(e.target.value)} />
+            </div>
             <button className="btn btn-primary btn-block" onClick={onCreate} disabled={busyBtn || !name.trim()}>
-              새 방 만들기
+              {pwInput.trim() ? '🔒 비밀번호 방 만들기' : '새 방 만들기'}
             </button>
             <div className="divider">
-              <span>또는</span>
+              <span>또는 코드로 입장</span>
             </div>
             <div className="row">
               <input
@@ -1590,7 +1650,70 @@ export default function App() {
             {error && <div className="error">{error}</div>}
             {!connected && <div className="muted">서버에 연결 중이에요… 계속 이 상태면 Realtime Database 주소를 확인해주세요.</div>}
           </div>
+
+          <div className="card card-pad stack">
+            <div className="row">
+              <div className="label" style={{ marginBottom: 0 }}>
+                열린 방 {roomList.length}개
+              </div>
+              <div className="spacer" />
+              <span className="muted">탭해서 입장</span>
+            </div>
+            {roomList.length === 0 ? (
+              <div className="muted">아직 열린 방이 없어요. 위에서 새 방을 만들어보세요.</div>
+            ) : (
+              <div className="room-list">
+                {roomList.map((r) => (
+                  <button key={r.code} className={`room-row ${r.status === 'playing' ? 'playing' : ''}`} onClick={() => onPickRoom(r)} disabled={busyBtn || !name.trim()}>
+                    <span className="room-lock">{r.locked ? '🔒' : '🔓'}</span>
+                    <span className="room-main">
+                      <b>{r.hostName ? `${r.hostName}의 방` : '방'}</b>
+                      <span className="muted">
+                        {r.code} · {r.count}명{r.online < r.count ? ` (접속 ${r.online})` : ''}
+                      </span>
+                    </span>
+                    <span className={`tag ${r.status === 'playing' ? 'tag-gray' : ''}`}>{r.status === 'playing' ? '게임 중' : '대기 중'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {!name.trim() && roomList.length > 0 && <div className="muted">입장하려면 먼저 이름을 입력하세요.</div>}
+          </div>
         </>
+      )}
+
+      {/* ---------- 비밀번호 입력 ---------- */}
+      {joinTarget && !room && (
+        <div className="modal-backdrop" onClick={() => setJoinTarget(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kicker">🔒 비밀번호 방</div>
+            <h2>방 {joinTarget.code}</h2>
+            <div className="muted">이 방은 비밀번호가 있어요. 방장에게 물어보세요.</div>
+            {!name.trim() && (
+              <input className="field" style={{ marginTop: 12 }} placeholder="내 이름" value={name} maxLength={10} onChange={(e) => saveName(e.target.value)} />
+            )}
+            <input
+              className="field"
+              style={{ marginTop: 12 }}
+              type="password"
+              placeholder="비밀번호"
+              value={pwJoin}
+              maxLength={12}
+              autoFocus
+              onChange={(e) => setPwJoin(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && tryJoin(joinTarget.code, pwJoin)}
+            />
+            {joinTarget.error && <div className="error" style={{ marginTop: 8 }}>{joinTarget.error}</div>}
+            <div className="actions">
+              <button className="btn btn-ghost" onClick={() => setJoinTarget(null)}>
+                취소
+              </button>
+              <button className="btn btn-primary" onClick={() => tryJoin(joinTarget.code, pwJoin)} disabled={busyBtn || !pwJoin || !name.trim()}>
+                입장
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ---------- 대기실 ---------- */}
