@@ -35,6 +35,8 @@ import {
   roomLog,
   trimLog,
   kickPlayer,
+  transferHost,
+  adjustDrinks,
   castVote,
   voteWinners,
   voteTally,
@@ -1225,6 +1227,50 @@ function NopIcon() {
   )
 }
 
+// 게임 종료 후 대기실에 뜨는 "오늘의 결과" (마신 잔 수 랭킹)
+function SummaryCard({ summary, me, onClose }) {
+  const rows = summary.rows || []
+  const top = rows[0]?.drinks || 0
+  const mins = summary.startedAt ? Math.max(1, Math.round((summary.at - summary.startedAt) / 60000)) : null
+  const medal = (i, d) => (d === 0 ? '' : d === top ? '🏆' : i === 1 ? '🥈' : i === 2 ? '🥉' : '')
+  return (
+    <div className="card card-pad stack summary-card">
+      <div className="row">
+        <div>
+          <div className="label">🏆 오늘의 결과</div>
+          <div className="big-code" style={{ letterSpacing: '-0.02em', fontSize: 22 }}>
+            {top === 0 ? '아무도 안 마셨어요 😇' : `오늘의 술고래: ${rows.filter((r) => r.drinks === top).map((r) => r.name).join(', ')} 🐳`}
+          </div>
+          {mins && (
+            <div className="muted">
+              총 {mins}분 · {rows.reduce((a, r) => a + r.drinks, 0)}잔
+            </div>
+          )}
+        </div>
+        <div className="spacer" />
+        <button className="icon-btn" onClick={onClose} aria-label="닫기" title="닫기">
+          ✕
+        </button>
+      </div>
+      <div className="player-list">
+        {rows.map((r, i) => (
+          <div className="player-row" key={r.pid}>
+            <span className="order">{i + 1}</span>
+            <span className="avatar" style={{ background: r.color }}>
+              {r.name.slice(0, 1)}
+            </span>
+            <span className="player-name">
+              {r.name} {r.pid === me && <span className="me-tag">나</span>}
+            </span>
+            <span className="drink-badge">🍺 {r.drinks}잔</span>
+            <span className="summary-medal">{medal(i, r.drinks)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [theme, toggleTheme] = useTheme()
   const me = myId()
@@ -1260,6 +1306,9 @@ export default function App() {
   const [showLog, setShowLog] = useState(false)
   const [missionSeen, setMissionSeen] = useState(null) // 수행자가 확인한 미션 id
   const [nopConfirm, setNopConfirm] = useState(null) // 놉카드 사용 확인 중인 참가자 id
+  const [orderEdit, setOrderEdit] = useState(false) // 게임 중 순서 편집(방장)
+  const [drinkEdit, setDrinkEdit] = useState(null) // 잔 수 수정 중인 참가자 id
+  const [summaryHidden, setSummaryHidden] = useState(null) // 닫은 결과 카드 id
   const [nopGive, setNopGive] = useState(false) // 양도 대상 선택 중
   const [pwInput, setPwInput] = useState('') // 방 만들 때 비밀번호(선택)
   const [roomList, setRoomList] = useState([]) // 홈 화면 방 목록
@@ -1500,7 +1549,6 @@ export default function App() {
     setBusyBtn(false)
   }
   const onPickRoom = (r) => {
-    if (r.status !== 'lobby' && !r.members.includes(me)) return setError('이미 시작된 게임이에요.')
     if (r.locked && !r.members.includes(me)) {
       setPwJoin('')
       setJoinTarget({ code: r.code })
@@ -1509,6 +1557,7 @@ export default function App() {
     return tryJoin(r.code, '')
   }
   const onLeave = async () => {
+    if (room?.status === 'playing' && !confirm('게임이 진행 중이에요. 나가면 순서에서 빠져요. 정말 나갈까요?')) return
     leavingRef.current = true
     if (room) await leaveRoom(code)
     setCode('')
@@ -1649,7 +1698,7 @@ export default function App() {
                         {r.count}명{r.online < r.count ? ` (접속 ${r.online})` : ''} · {new Date(r.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 생성
                       </span>
                     </span>
-                    <span className={`tag ${r.status === 'playing' ? 'tag-gray' : ''}`}>{r.status === 'playing' ? '게임 중' : '대기 중'}</span>
+                    <span className={`tag ${r.status === 'playing' ? 'tag-gray' : ''}`}>{r.status === 'playing' ? '게임 중 · 합류 가능' : '대기 중'}</span>
                   </button>
                 ))}
               </div>
@@ -1696,6 +1745,9 @@ export default function App() {
       {/* ---------- 대기실 ---------- */}
       {room && room.status === 'lobby' && (
         <>
+          {room.summary && room.summary.id !== summaryHidden && room.summary.rows?.length > 0 && (
+            <SummaryCard summary={room.summary} me={me} onClose={() => setSummaryHidden(room.summary.id)} />
+          )}
           <div className="card card-pad stack">
             <div className="row">
               <div>
@@ -1746,6 +1798,11 @@ export default function App() {
                           ▼
                         </button>
                         {pid !== me && (
+                          <button className="crown" aria-label="방장 위임" title="방장 위임" onClick={() => confirm(`${p.name} 님에게 방장을 넘길까요?`) && transferHost(code, room, pid)}>
+                            👑
+                          </button>
+                        )}
+                        {pid !== me && (
                           <button className="kick" aria-label="강퇴" title="강퇴" onClick={() => confirm(`${p.name} 님을 방에서 내보낼까요? (다시 들어올 수 없어요)`) && kickPlayer(code, room, pid)}>
                             ✕
                           </button>
@@ -1756,7 +1813,7 @@ export default function App() {
                 )
               })}
             </div>
-            {isHost && <div className="muted">▲▼ 로 순서를 바꾸고, ✕ 로 내보낼 수 있어요. 1번부터 시작합니다.</div>}
+            {isHost && <div className="muted">▲▼ 순서 변경 · 👑 방장 위임 · ✕ 내보내기. 1번부터 시작합니다.</div>}
           </div>
 
           {isHost ? (
@@ -1840,7 +1897,17 @@ export default function App() {
           />
 
           <div>
-            <div className="section-title">순서 · 놉카드</div>
+            <div className="row" style={{ alignItems: 'center' }}>
+              <div className="section-title" style={{ marginBottom: 0 }}>
+                순서 · 🍺 잔 · 놉카드
+              </div>
+              <div className="spacer" />
+              {isHost && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setOrderEdit(true)}>
+                  ✏️ 순서 편집
+                </button>
+              )}
+            </div>
             <div className="players-strip">
               {order.map((pid, i) => {
                 const p = room.players[pid]
@@ -1853,19 +1920,29 @@ export default function App() {
                       {p.name.slice(0, 1)}
                     </span>
                     <span className="pname">{p.name}</span>
-                    <button
-                      className={`nop-badge ${(p.nop || 0) === 0 ? 'empty' : ''}`}
-                      onClick={() => {
-                        if (mine && (p.nop || 0) > 0) {
-                          setNopGive(false)
-                          setNopConfirm(pid)
-                        }
-                      }}
-                      disabled={!mine || (p.nop || 0) === 0}
-                      title={mine ? '내 놉카드 사용' : '놉카드 보유 수'}
-                    >
-                      <NopIcon /> {p.nop || 0}
-                    </button>
+                    <span className="pcard-badges">
+                      <button
+                        className={`drink-badge ${(p.drinks || 0) === 0 ? 'empty' : ''}`}
+                        onClick={() => (mine || isHost) && setDrinkEdit(pid)}
+                        disabled={!mine && !isHost}
+                        title={mine || isHost ? '마신 잔 수 고치기' : '마신 잔 수'}
+                      >
+                        🍺 {p.drinks || 0}
+                      </button>
+                      <button
+                        className={`nop-badge ${(p.nop || 0) === 0 ? 'empty' : ''}`}
+                        onClick={() => {
+                          if (mine && (p.nop || 0) > 0) {
+                            setNopGive(false)
+                            setNopConfirm(pid)
+                          }
+                        }}
+                        disabled={!mine || (p.nop || 0) === 0}
+                        title={mine ? '내 놉카드 사용' : '놉카드 보유 수'}
+                      >
+                        <NopIcon /> {p.nop || 0}
+                      </button>
+                    </span>
                   </div>
                 )
               })}
@@ -2046,6 +2123,90 @@ export default function App() {
       )}
 
       {/* ---------- 놉카드 사용 / 양도 ---------- */}
+      {/* ---------- 게임 중 순서 편집 / 방장 위임 (방장) ---------- */}
+      {orderEdit && room && room.status === 'playing' && isHost && (
+        <div className="modal-backdrop" onClick={() => setOrderEdit(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kicker">✏️ 순서 편집</div>
+            <h2>순서를 바꾸거나 방장을 넘겨요</h2>
+            <div className="muted">늦게 합류한 사람은 맨 뒤에 들어와요. ▲▼로 옮길 수 있고, 지금 차례인 사람은 그대로 유지돼요.</div>
+            <div className="player-list" style={{ marginTop: 10 }}>
+              {order.map((pid, i, arr) => {
+                const p = room.players[pid]
+                if (!p?.name) return null
+                return (
+                  <div className={`player-row ${pid === curId ? 'now' : ''}`} key={pid}>
+                    <span className="order">{i + 1}</span>
+                    <span className="avatar" style={{ background: p.color }}>
+                      {p.name.slice(0, 1)}
+                    </span>
+                    <span className="player-name">
+                      {p.name}
+                      {pid === curId && (
+                        <span className="tag" style={{ marginLeft: 6 }}>
+                          차례
+                        </span>
+                      )}
+                    </span>
+                    {pid === room.hostId && <span className="tag">방장</span>}
+                    <span className="order-btns">
+                      <button aria-label="위로" disabled={i === 0} onClick={() => moveOrder(code, room, pid, -1)}>
+                        ▲
+                      </button>
+                      <button aria-label="아래로" disabled={i === arr.length - 1} onClick={() => moveOrder(code, room, pid, 1)}>
+                        ▼
+                      </button>
+                      {pid !== me && (
+                        <button
+                          className="crown"
+                          aria-label="방장 위임"
+                          title="방장 위임"
+                          onClick={() => confirm(`${p.name} 님에게 방장을 넘길까요?`) && transferHost(code, room, pid).then(() => setOrderEdit(false))}
+                        >
+                          👑
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="actions">
+              <button className="btn btn-primary" onClick={() => setOrderEdit(false)}>
+                완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- 마신 잔 수 고치기 ---------- */}
+      {drinkEdit && room?.players?.[drinkEdit] && (drinkEdit === me || isHost) && (
+        <div className="modal-backdrop" onClick={() => setDrinkEdit(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="kicker">🍺 마신 잔 수</div>
+            <h2>
+              <b style={{ color: room.players[drinkEdit].color }}>{room.players[drinkEdit].name}</b> · {room.players[drinkEdit].drinks || 0}잔
+            </h2>
+            <div className="muted">벌칙으로 마실 때 자동으로 올라가요. 실제로 마신 잔 수와 다르면 여기서 고칠 수 있어요.</div>
+            <div className="drink-ctrl">
+              <button className="btn btn-ghost" onClick={() => adjustDrinks(code, room, drinkEdit, -1)} disabled={(room.players[drinkEdit].drinks || 0) <= 0}>
+                − 1잔
+              </button>
+              <span className="drink-num">{room.players[drinkEdit].drinks || 0}</span>
+              <button className="btn btn-primary" onClick={() => adjustDrinks(code, room, drinkEdit, 1)}>
+                + 1잔
+              </button>
+            </div>
+            <div className="actions">
+              <button className="btn btn-ghost" onClick={() => setDrinkEdit(null)}>
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {nopConfirm && room?.players?.[nopConfirm] && (DEMO || nopConfirm === me) && (
         <div className="modal-backdrop" onClick={() => setNopConfirm(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>

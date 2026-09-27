@@ -2058,3 +2058,80 @@ input {
 .room-main .muted {
   font-size: 12px;
 }
+
+/* ---------- 잔 수 / 순서 편집 / 오늘의 결과 ---------- */
+.drink-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #6b4a00;
+  background: #ffe8a8;
+  border-radius: 8px;
+  padding: 4px 7px;
+  flex: none;
+  white-space: nowrap;
+}
+.drink-badge.empty {
+  opacity: 0.55;
+}
+.drink-badge:disabled {
+  opacity: 0.8;
+}
+.order-btns .crown {
+  font-size: 13px;
+}
+.player-row.now {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.drink-ctrl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 16px 0 4px;
+}
+.drink-ctrl .btn {
+  min-width: 96px;
+}
+.drink-num {
+  font-size: 32px;
+  font-weight: 900;
+  min-width: 48px;
+  text-align: center;
+}
+.summary-card {
+  border-color: #f5c542;
+  background: linear-gradient(180deg, rgba(255, 216, 94, 0.18), transparent 70%);
+}
+.summary-card .player-row {
+  gap: 10px;
+}
+.summary-medal {
+  width: 24px;
+  text-align: center;
+  font-size: 16px;
+}
+
+/* pcard: 배지가 2개라 이름이 안 잘리게 2줄 구성 */
+.pcard {
+  flex-wrap: wrap;
+  border-radius: 16px;
+  row-gap: 6px;
+}
+.pcard .pname {
+  flex: 1 1 40px;
+}
+.pcard .pcard-badges {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  justify-content: flex-end;
+}
+.pcard .pcard-badges .nop-badge,
+.pcard .pcard-badges .drink-badge {
+  padding: 3px 7px;
+  font-size: 12px;
+}

@@ -137,7 +137,6 @@ export async function joinRoom(code, name, password = '') {
   const players = room.players || {}
   if (room.kicked?.[id]) throw new Error('방장이 이 방에서 내보낸 참가자예요.')
   if (!players[id]?.name) {
-    if (room.status !== 'lobby') throw new Error('이미 시작된 게임이에요.')
     if (room.pw && room.pw !== String(password || '').trim()) {
       const err = new Error(password ? '비밀번호가 틀렸어요.' : '비밀번호가 필요한 방이에요.')
       err.needPassword = true
@@ -146,7 +145,13 @@ export async function joinRoom(code, name, password = '') {
     if (Object.keys(players).length >= 10) throw new Error('방이 가득 찼어요 (최대 10명).')
     const used = new Set(Object.values(players).map((p) => p.color))
     const color = COLORS.find((c) => !used.has(c)) || COLORS[Object.keys(players).length % COLORS.length]
-    await dbUpdate(`rooms/${code}/players/${id}`, { name, color, nop: 0, joinedAt: now() })
+    const upd = { [`players/${id}`]: { name, color, nop: 0, drinks: 0, joinedAt: now() } }
+    if (room.status === 'playing') {
+      // 게임 중 합류: 순서 맨 뒤에 붙고, 방장이 순서 편집으로 옮길 수 있음
+      upd.order = [...roomOrder(room), id]
+      upd.event = { id: newId(), text: `👋 ${name} 님이 게임에 합류했어요 (순서 맨 뒤)` }
+    }
+    await roomUpdate(code, upd)
   } else if (players[id].name !== name) {
     await dbUpdate(`rooms/${code}/players/${id}`, { name })
   }
@@ -157,12 +162,36 @@ export async function leaveRoom(code) {
   const id = myId()
   const room = await dbGet(roomPath(code))
   if (room == null) return
-  if (room.status === 'lobby') {
-    await dbRemove(`rooms/${code}/players/${id}`)
-    const rest = Object.keys(room.players || {}).filter((p) => p !== id)
-    if (rest.length === 0) await dbRemove(roomPath(code))
-    else if (room.hostId === id) await roomUpdate(code, { hostId: rest[0] })
+  const rest = Object.keys(room.players || {}).filter((p) => p !== id && room.players[p]?.name)
+  if (rest.length === 0) {
+    await dbRemove(roomPath(code))
+    return
   }
+  const upd = { [`players/${id}`]: null }
+  if (room.hostId === id) {
+    // 방장 자동 위임: 접속 중인 사람 우선
+    const next = rest.find((p) => room.players[p]?.online !== false) || rest[0]
+    upd.hostId = next
+    upd.event = { id: newId(), text: `👑 ${room.players[id]?.name}이(가) 나가서 ${room.players[next]?.name}이(가) 방장이 됐어요` }
+  }
+  if (room.status === 'playing') {
+    // 게임 중 나가기: 순서에서 빼고, 현재 차례가 어긋나지 않게 turn 보정
+    const order = roomOrder(room)
+    const curId = currentPlayerId(room)
+    const newOrder = order.filter((p) => p !== id)
+    upd.order = newOrder
+    const curIdx = newOrder.indexOf(curId)
+    upd.turn = curIdx >= 0 ? curIdx : (room.turn || 0) % Math.max(1, newOrder.length)
+    if (room.pending?.playerId === id) upd.pending = null
+    if (!upd.event) upd.event = { id: newId(), text: `👋 ${room.players[id]?.name} 님이 나갔어요` }
+  }
+  await roomUpdate(code, upd)
+}
+
+// 방장 위임 (방장만, 대기실/게임 중 모두)
+export async function transferHost(code, room, toId) {
+  if (room.hostId !== myId() || !room.players?.[toId]?.name || toId === room.hostId) return
+  await roomUpdate(code, { hostId: toId, event: { id: newId(), text: `👑 ${room.players[toId].name}이(가) 새 방장이 됐어요` } })
 }
 
 // 방 삭제 (모든 참가자 화면에 '방이 사라졌어요' 표시)
@@ -220,13 +249,17 @@ export function lobbyOrder(room) {
 
 // 방장: 대기실 순서 변경 (dir = -1 위로 / +1 아래로)
 export async function moveOrder(code, room, playerId, dir) {
-  if (room.hostId !== myId() || room.status !== 'lobby') return
-  const order = lobbyOrder(room)
+  if (room.hostId !== myId()) return
+  const playing = room.status === 'playing'
+  const order = playing ? roomOrder(room) : lobbyOrder(room)
+  const curId = playing ? currentPlayerId(room) : null
   const i = order.indexOf(playerId)
   const j = i + dir
   if (i < 0 || j < 0 || j >= order.length) return
   ;[order[i], order[j]] = [order[j], order[i]]
-  await roomUpdate(code, { order, orderSet: true })
+  const upd = { order, orderSet: true }
+  if (playing && curId) upd.turn = Math.max(0, order.indexOf(curId))
+  await roomUpdate(code, upd)
 }
 
 // 방장: 순서 랜덤으로 섞기 (대기실)
@@ -250,18 +283,22 @@ export async function kickPlayer(code, room, playerId) {
 
 export async function startGame(code, room) {
   const order = room.orderSet ? lobbyOrder(room) : shuffle(lobbyOrder(room))
-  await roomUpdate(code, {
+  const upd = {
     status: 'playing',
     order,
     turn: 0,
     proxy: null,
     mission: null,
+    summary: null,
+    startedAt: Date.now(),
     rollsSinceMission: MISSION_MIN_GAP,
     pos: room.pos || { track: 'main', idx: 0 },
     pending: null,
     lastMove: null,
     event: { id: newId(), text: `순서: ${order.map((id) => room.players[id].name).join(' → ')}` },
-  })
+  }
+  Object.keys(room.players || {}).forEach((pid) => (upd[`players/${pid}/drinks`] = 0))
+  await roomUpdate(code, upd)
 }
 
 // 아직 안 나온 밸런스 주제 중 하나를 고름 (다 나오면 처음부터 다시)
@@ -497,9 +534,23 @@ export async function missionDone(code, room) {
   const text = r.caught
     ? `🎯 돌발 미션 "${m.text}" — 들켰다! ${who} 마셔 🍶`
     : `🎯 돌발 미션 "${m.text}" — 못 맞힘! ${r.wrong.map((pid) => room.players[pid]?.name).filter(Boolean).join(', ') || '아무도'} 마셔 🍶`
-  await roomUpdate(code, { mission: null, rollsSinceMission: 0, event: { id: newId(), text } })
+  await roomUpdate(code, addDrinks(room, { mission: null, rollsSinceMission: 0, event: { id: newId(), text } }, r.caught ? [m.playerId] : r.wrong))
 }
 
+
+// 마신 잔 수 +n (자동 집계용)
+function addDrinks(room, upd, ids, n = 1) {
+  ;(ids || []).forEach((pid) => {
+    if (!room.players?.[pid]) return
+    upd[`players/${pid}/drinks`] = (room.players[pid].drinks || 0) + n
+  })
+  return upd
+}
+export async function adjustDrinks(code, room, pid, delta) {
+  const p = room.players?.[pid]
+  if (!p) return
+  await roomUpdate(code, { [`players/${pid}/drinks`]: Math.max(0, (p.drinks || 0) + delta) })
+}
 
 function nextTurnUpdates(room) {
   const order = roomOrder(room)
@@ -665,10 +716,10 @@ export async function resolvePending(code, room, action, target) {
       }
       if (action === 'done' && p.stage === 'result') {
         const winners = voteWinners(p)
-        await roomUpdate(code, {
+        await roomUpdate(code, addDrinks(room, {
           ...nextTurnUpdates(room),
           event: { id: newId(), text: `🗳️ 다수결 지목 → ${winners.map((w) => room.players[w]?.name).join(', ')} 마셔! 🍶` },
-        })
+        }, winners))
       }
       return
     }
@@ -704,10 +755,10 @@ export async function resolvePending(code, room, action, target) {
       if (action === 'done' && p.stage === 'result') {
         const r = reactionRanking(room, p)
         const loser = r[r.length - 1]
-        await roomUpdate(code, {
+        await roomUpdate(code, addDrinks(room, {
           ...nextTurnUpdates(room),
           event: { id: newId(), text: loser ? `⚡ 반응속도 꼴찌 ${room.players[loser.pid]?.name} (${loser.label}) 마셔! 🍶` : '⚡ 반응속도 게임 종료' },
-        })
+        }, loser ? [loser.pid] : []))
       }
       return
     }
@@ -734,6 +785,7 @@ export async function resolvePending(code, room, action, target) {
           }
         } else {
           upd.event = { id: newId(), text: p.roulette === 'win' ? `🎰 ${me.name} 도박 성공! 안 마셔도 돼요 😇` : `🎰 ${me.name} 도박 실패… 마셔! 🍶` }
+          if (p.roulette !== 'win') addDrinks(room, upd, [id])
         }
         await roomUpdate(code, upd)
       }
@@ -776,10 +828,10 @@ export async function resolvePending(code, room, action, target) {
     }
     case 'aiPick': {
       const t = room.players[p.target]
-      await roomUpdate(code, {
+      await roomUpdate(code, addDrinks(room, {
         ...nextTurnUpdates(room),
         event: { id: newId(), text: `🤖 AI 지목 → ${t?.name || '?'} 마셔! 🍶` },
-      })
+      }, [p.target]))
       return
     }
     case 'balance': {
@@ -803,7 +855,11 @@ export async function resolvePending(code, room, action, target) {
           p.stage === 'roulette'
             ? `⚖️ ${ta} ${r.a} : ${r.b} ${tb} 만장일치 → 룰렛 ${p.roulette === 'drink' ? '다같이 마셔! 🍻' : '아무도 안 마셔 😇'}`
             : `⚖️ ${ta} ${r.a} : ${r.b} ${tb} → 소수 ${r.losers.map((x) => room.players[x]?.name).filter(Boolean).join(', ')} 마셔! 🍶`
-        await roomUpdate(code, { ...nextTurnUpdates(room), event: { id: newId(), text } })
+        const upd = { ...nextTurnUpdates(room), event: { id: newId(), text } }
+        if (p.stage === 'roulette') {
+          if (p.roulette === 'drink') addDrinks(room, upd, Object.keys(room.players || {}))
+        } else addDrinks(room, upd, r.losers)
+        await roomUpdate(code, upd)
       }
       return
     }
@@ -870,7 +926,25 @@ export async function hostSkipTurn(code, room) {
 
 export async function restartGame(code, room) {
   if (room.hostId !== myId()) return
-  const updates = { status: 'lobby', pending: null, lastMove: null, turn: 0, pos: { track: 'main', idx: 0 }, order: null, orderSet: null, options: null, log: null, mission: null, proxy: null }
+  // 오늘의 결과 (마신 잔 수 랭킹) — 대기실 상단에 표시
+  const rows = Object.entries(room.players || {})
+    .filter(([, p]) => p?.name)
+    .map(([pid, p]) => ({ pid, name: p.name, color: p.color, drinks: p.drinks || 0 }))
+    .sort((a, b) => b.drinks - a.drinks)
+  const updates = {
+    status: 'lobby',
+    pending: null,
+    lastMove: null,
+    turn: 0,
+    pos: { track: 'main', idx: 0 },
+    order: null,
+    orderSet: null,
+    options: null,
+    log: null,
+    mission: null,
+    proxy: null,
+    summary: { id: newId(), at: Date.now(), startedAt: room.startedAt || null, rows },
+  }
   Object.keys(room.players || {}).forEach((pid) => (updates[`players/${pid}/nop`] = 0))
   await roomUpdate(code, updates)
 }
