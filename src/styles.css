@@ -2122,23 +2122,31 @@ input {
   font-size: 16px;
 }
 
-/* pcard: 배지가 2개라 이름이 안 잘리게 2줄 구성 */
-.pcard {
-  flex-wrap: wrap;
-  border-radius: 16px;
-  row-gap: 6px;
+/* 라이어 결과: 누가 누굴 찍었나 */
+.vote-row .pname {
+  flex: 0 1 auto;
+  max-width: 34%;
 }
-.pcard .pname {
-  flex: 1 1 40px;
+.vote-arrow {
+  color: var(--text-3);
+  flex: none;
 }
-.pcard .pcard-badges {
-  display: flex;
-  gap: 6px;
-  width: 100%;
-  justify-content: flex-end;
+.vote-pick {
+  flex: 1;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.pcard .pcard-badges .nop-badge,
-.pcard .pcard-badges .drink-badge {
-  padding: 3px 7px;
+.vote-row b {
+  flex: none;
   font-size: 12px;
+  white-space: nowrap;
+}
+.vote-row.right b {
+  color: #1a8f3c;
+}
+.vote-row.wrong b {
+  color: var(--accent);
 }

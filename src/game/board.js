@@ -19,7 +19,7 @@ export const DEFAULT_CELLS = [
   { id: 5, emoji: '💣', text: '폭탄 돌리기', type: 'bomb' },
   { id: 6, emoji: '⚡', text: '반응속도\n게임', type: 'reaction' },
   { id: 7, emoji: '🖐️', text: '손병호 게임' },
-  { id: 8, emoji: '👉', text: '너! 마셔! (지목)' },
+  { id: 8, emoji: '👉', text: '너! 마셔!\n(지목)', type: 'pick' },
   { id: 9, emoji: '🎫', text: '놉카드 +1', type: 'nop' },
   { id: 10, emoji: '🎁', text: '게임 선택권', type: 'choose' },
   { id: 11, emoji: '🍶', text: '박상혁만 마셔!' },
