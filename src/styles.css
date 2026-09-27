@@ -81,10 +81,16 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  /* iOS 홈 화면 앱(standalone)에서 하단 홈 인디케이터 영역까지 배경이 꽉 차도록 */
+  height: 100%;
+  background: var(--bg);
+}
 html,
 body {
   margin: 0;
   padding: 0;
+  min-height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
@@ -109,6 +115,7 @@ input {
 
 .app {
   min-height: 100dvh;
+  box-sizing: border-box;
   max-width: 520px;
   margin: 0 auto;
   padding: 0 10px calc(16px + env(safe-area-inset-bottom));
