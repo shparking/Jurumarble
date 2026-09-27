@@ -866,6 +866,7 @@ function ShufflePanel({ room, pending: p, iAct, code }) {
 
 // 라이어 게임(워드 울프): 키워드 확인 → 설명 → 투표 → 결과. 모든 폰에 표시
 function LiarPanel({ room, pending: p, me, iAct, code }) {
+  const [openTally, setOpenTally] = useState(null) // 결과 화면에서 펼친 득표 칸
   const [show, setShow] = useState(false)
   useEffect(() => setShow(false), [p.stage])
   const ids = Object.keys(p.words || {}).filter((pid) => room.players[pid]?.name)
@@ -979,23 +980,44 @@ function LiarPanel({ room, pending: p, me, iAct, code }) {
                   <b>{room.players[p.liar]?.name}</b>
                 </div>
               </div>
-              <div className="muted">누가 누굴 찍었나 — 맞힌 사람은 안 마셔요</div>
+              <div className="muted">득표 칸을 누르면 누가 찍었는지 보여요 · 라이어를 맞힌 사람은 안 마셔요</div>
               <div className="tally">
-                {ids.map((pid) => {
-                  const picked = p.votes?.[pid]
-                  const right = picked === p.liar
-                  return (
-                    <div key={pid} className={`tally-row vote-row ${right ? 'right' : 'wrong'}`}>
-                      <span className="avatar sm" style={{ background: room.players[pid]?.color }}>
-                        {room.players[pid]?.name?.slice(0, 1)}
-                      </span>
-                      <span className="pname">{room.players[pid]?.name}</span>
-                      <span className="vote-arrow">→</span>
-                      <span className="vote-pick">{room.players[picked]?.name || '기권'}</span>
-                      <b>{right ? '✅ 맞힘' : '🍶 마셔'}</b>
-                    </div>
-                  )
-                })}
+                {ids
+                  .map((pid) => ({ pid, n: res.tally[pid] || 0 }))
+                  .sort((a, b) => b.n - a.n)
+                  .map(({ pid, n }) => {
+                    const voters = ids.filter((v) => p.votes?.[v] === pid)
+                    const open = openTally === pid
+                    return (
+                      <div key={pid} className={`tally-item ${open ? 'open' : ''}`}>
+                        <button type="button" className={`tally-row ${pid === p.liar ? 'liar' : ''}`} onClick={() => setOpenTally(open ? null : pid)}>
+                          <span className="avatar sm" style={{ background: room.players[pid]?.color }}>
+                            {room.players[pid]?.name?.slice(0, 1)}
+                          </span>
+                          <span className="pname">{room.players[pid]?.name}</span>
+                          <span className="tally-bar">
+                            <i style={{ width: `${ids.length ? (n / ids.length) * 100 : 0}%` }} />
+                          </span>
+                          <b>{n}표</b>
+                          <span className="tally-chev">{open ? '▴' : '▾'}</span>
+                        </button>
+                        {open && (
+                          <div className="tally-voters">
+                            {voters.length === 0 && <span className="muted">아무도 안 찍었어요</span>}
+                            {voters.map((v) => (
+                              <span key={v} className={`voter-chip ${pid === p.liar ? 'right' : 'wrong'}`}>
+                                <span className="avatar xs" style={{ background: room.players[v]?.color }}>
+                                  {room.players[v]?.name?.slice(0, 1)}
+                                </span>
+                                {room.players[v]?.name}
+                                <em>{pid === p.liar ? '✅ 맞힘' : '🍶 마셔'}</em>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
               </div>
             </div>
             <div className="actions">

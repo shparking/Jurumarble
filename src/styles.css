@@ -2122,31 +2122,57 @@ input {
   font-size: 16px;
 }
 
-/* 라이어 결과: 누가 누굴 찍었나 */
-.vote-row .pname {
-  flex: 0 1 auto;
-  max-width: 34%;
+/* 라이어 결과: 득표 칸을 누르면 찍은 사람 목록 */
+.tally-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-.vote-arrow {
+.tally-item > .tally-row {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+.tally-item.open > .tally-row {
+  background: var(--surface);
+}
+.tally-chev {
   color: var(--text-3);
+  font-size: 11px;
   flex: none;
+  width: 12px;
 }
-.vote-pick {
-  flex: 1;
-  font-weight: 700;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.vote-row b {
-  flex: none;
+.tally-voters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px 6px 40px;
   font-size: 12px;
-  white-space: nowrap;
 }
-.vote-row.right b {
+.voter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-weight: 700;
+}
+.voter-chip em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 800;
+}
+.voter-chip.right em {
   color: #1a8f3c;
 }
-.vote-row.wrong b {
+.voter-chip.wrong em {
   color: var(--accent);
+}
+.avatar.xs {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
 }
