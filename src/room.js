@@ -829,7 +829,8 @@ export async function resolvePending(code, room, action, target) {
       if (action === 'choose' && target && room.players[target]?.name && p.stage !== 'result') {
         await roomUpdate(code, {
           pending: { ...p, stage: 'result', target, startedAt: Date.now() },
-          event: { id: newId(), text: `👉 ${me.name}이(가) ${room.players[target].name}을(를) 지목!` },
+          // 누구를 골랐는지는 카운트다운 뒤 공개 (로그·토스트 스포 방지)
+          event: { id: newId(), text: `👉 ${me.name}이(가) 마실 사람을 골랐어요! 3, 2, 1…` },
         })
         return
       }
