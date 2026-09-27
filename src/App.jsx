@@ -1186,6 +1186,7 @@ function DebugPanel({ room, code, me, connected }) {
       options: room.options,
       mission: room.mission && { stage: room.mission.stage, playerId: room.mission.playerId, endsIn: Math.round((room.mission.endsAt - Date.now()) / 1000), text: room.mission.text },
       serverOffset: serverNow() - Date.now(),
+      rollsSinceMission: room.rollsSinceMission,
       event: room.event?.text,
     },
     errors: errLog.slice(-20),
@@ -1236,7 +1237,6 @@ export default function App() {
       return ''
     }
   })
-  const [codeInput, setCodeInput] = useState('')
   const [code, setCode] = useState(() => {
     const q = new URLSearchParams(window.location.search).get('room')
     if (q) return q.toUpperCase()
@@ -1342,9 +1342,8 @@ export default function App() {
           setError(e.message)
         })
       } else {
-        setCodeInput(code)
         setCode('')
-        setError(room.status === 'lobby' ? '이름을 입력하고 입장을 눌러주세요.' : '이미 시작된 게임이에요.')
+        setError(room.status === 'lobby' ? '이름을 입력하고 아래 목록에서 방을 눌러주세요.' : '이미 시작된 게임이에요.')
       }
     }
   }, [room, me, name, code])
@@ -1500,10 +1499,6 @@ export default function App() {
     }
     setBusyBtn(false)
   }
-  const onJoin = () => {
-    if (codeInput.trim().length < 4) return setError('방 코드 4자리를 입력해주세요.')
-    return tryJoin(codeInput, '')
-  }
   const onPickRoom = (r) => {
     if (r.status !== 'lobby' && !r.members.includes(me)) return setError('이미 시작된 게임이에요.')
     if (r.locked && !r.members.includes(me)) {
@@ -1589,7 +1584,6 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <span className={`brand-dot ${connected ? '' : 'off'}`} title={connected ? '연결됨' : '연결 중…'} /> 주루마블
-          {room && <span className="code-chip">{code}</span>}
         </div>
         <div className="row">
           {room && (
@@ -1630,23 +1624,6 @@ export default function App() {
             <button className="btn btn-primary btn-block" onClick={onCreate} disabled={busyBtn || !name.trim()}>
               {pwInput.trim() ? '🔒 비밀번호 방 만들기' : '새 방 만들기'}
             </button>
-            <div className="divider">
-              <span>또는 코드로 입장</span>
-            </div>
-            <div className="row">
-              <input
-                className="field code-field"
-                placeholder="방 코드"
-                value={codeInput}
-                maxLength={4}
-                autoCapitalize="characters"
-                onChange={(e) => setCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                onKeyDown={(e) => e.key === 'Enter' && onJoin()}
-              />
-              <button className="btn btn-ghost" onClick={onJoin} disabled={busyBtn || codeInput.length < 4 || !name.trim()}>
-                입장
-              </button>
-            </div>
             {error && <div className="error">{error}</div>}
             {!connected && <div className="muted">서버에 연결 중이에요… 계속 이 상태면 Realtime Database 주소를 확인해주세요.</div>}
           </div>
@@ -1669,7 +1646,7 @@ export default function App() {
                     <span className="room-main">
                       <b>{r.hostName ? `${r.hostName}의 방` : '방'}</b>
                       <span className="muted">
-                        {r.code} · {r.count}명{r.online < r.count ? ` (접속 ${r.online})` : ''}
+                        {r.count}명{r.online < r.count ? ` (접속 ${r.online})` : ''} · {new Date(r.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 생성
                       </span>
                     </span>
                     <span className={`tag ${r.status === 'playing' ? 'tag-gray' : ''}`}>{r.status === 'playing' ? '게임 중' : '대기 중'}</span>
@@ -1687,7 +1664,7 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => setJoinTarget(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="kicker">🔒 비밀번호 방</div>
-            <h2>방 {joinTarget.code}</h2>
+            <h2>{roomList.find((r) => r.code === joinTarget.code)?.hostName ? `${roomList.find((r) => r.code === joinTarget.code).hostName}의 방` : '비밀번호 방'}</h2>
             <div className="muted">이 방은 비밀번호가 있어요. 방장에게 물어보세요.</div>
             {!name.trim() && (
               <input className="field" style={{ marginTop: 12 }} placeholder="내 이름" value={name} maxLength={10} onChange={(e) => saveName(e.target.value)} />
@@ -1722,15 +1699,18 @@ export default function App() {
           <div className="card card-pad stack">
             <div className="row">
               <div>
-                <div className="label">방 코드</div>
-                <div className="big-code">{code}</div>
+                <div className="label">대기실</div>
+                <div className="big-code" style={{ letterSpacing: '-0.02em', fontSize: 24 }}>
+                  {room.pw ? '🔒 ' : ''}
+                  {room.hostName || room.players?.[room.hostId]?.name}의 방
+                </div>
               </div>
               <div className="spacer" />
               <button className="btn btn-ghost btn-sm" onClick={shareLink}>
                 초대 링크
               </button>
             </div>
-            <div className="muted">친구들이 이 코드로 들어오면 아래에 나타나요. 순서는 방장이 정할 수 있고, 안 정하면 랜덤이에요.</div>
+            <div className="muted">친구들이 홈 화면의 방 목록에서 이 방을 누르면 아래에 나타나요. 순서는 방장이 정할 수 있고, 안 정하면 랜덤이에요.</div>
           </div>
 
           <div className="card card-pad stack">

@@ -39,7 +39,8 @@ export const MISSIONS = [
   { text: '잔 채울 때 "쪼르륵" 소리 내기 (2번)', minutes: 5 },
 ]
 
-export const MISSION_CHANCE = 0.1
+export const MISSION_CHANCE = 0.05
+export const MISSION_MIN_GAP = 5 // 직전 미션이 끝난 뒤 최소 이만큼 굴린 뒤부터
 export const MISSION_CHOICES = 5
 
 // 미션 하나 뽑기 + 5지선다(정답 + 오답 4개) 구성

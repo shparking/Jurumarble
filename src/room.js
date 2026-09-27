@@ -14,7 +14,7 @@ import { DEFAULT_CELLS, DEFAULT_BRIDGE, LAYOUTS, MAIN_COUNT, computePath, cellAt
 import { BALANCE_TOPICS } from './game/balance'
 import { pickLiarWords } from './game/liar'
 import { pickBombTopic } from './game/bomb'
-import { drawMission, MISSION_CHANCE } from './game/missions'
+import { drawMission, MISSION_CHANCE, MISSION_MIN_GAP } from './game/missions'
 import { autoEmoji } from './game/emoji'
 
 export const COLORS = ['#ea002c', '#2f6df6', '#1fa97a', '#f59e0b', '#8b5cf6', '#ec4899', '#0ea5e9', '#84cc16', '#14b8a6', '#f97316']
@@ -256,6 +256,7 @@ export async function startGame(code, room) {
     turn: 0,
     proxy: null,
     mission: null,
+    rollsSinceMission: MISSION_MIN_GAP,
     pos: room.pos || { track: 'main', idx: 0 },
     pending: null,
     lastMove: null,
@@ -435,11 +436,16 @@ export async function rollDice(code, room) {
 
 // 돌발 미션: 진행 중인 미션이 없을 때 10% 확률로 한 명에게 몰래 전달 (데모: ?mission=초 로 강제)
 function maybeMission(room, updates) {
+  // 직전 미션이 끝난 뒤 굴린 횟수 (미션이 없을 때만 셈)
+  const since = room.mission ? room.rollsSinceMission || 0 : (room.rollsSinceMission || 0) + 1
+  updates.rollsSinceMission = since
   if (room.mission) return
   const ids = Object.keys(room.players || {}).filter((pid) => room.players[pid]?.name)
   if (ids.length < 2) return
   const forced = DEMO ? parseInt(new URLSearchParams(window.location.search).get('mission'), 10) : NaN
+  if (since < MISSION_MIN_GAP) return
   if (!(forced > 0) && Math.random() >= MISSION_CHANCE) return
+  updates.rollsSinceMission = 0
   const who = ids[Math.floor(Math.random() * ids.length)]
   const others = ids.filter((pid) => pid !== who)
   const targetName = room.players[others[Math.floor(Math.random() * others.length)]]?.name || ''
@@ -491,7 +497,7 @@ export async function missionDone(code, room) {
   const text = r.caught
     ? `🎯 돌발 미션 "${m.text}" — 들켰다! ${who} 마셔 🍶`
     : `🎯 돌발 미션 "${m.text}" — 못 맞힘! ${r.wrong.map((pid) => room.players[pid]?.name).filter(Boolean).join(', ') || '아무도'} 마셔 🍶`
-  await roomUpdate(code, { mission: null, event: { id: newId(), text } })
+  await roomUpdate(code, { mission: null, rollsSinceMission: 0, event: { id: newId(), text } })
 }
 
 
